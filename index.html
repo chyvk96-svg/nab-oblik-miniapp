@@ -7,7 +7,7 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Anton&display=swap" rel="stylesheet">
 <style>
   :root {
     --asphalt: #141311;
@@ -32,36 +32,35 @@
   .topbar {
     background: var(--asphalt);
     color: var(--concrete);
-    padding: 14px 16px 12px;
+    padding: 9px 16px 7px;
     position: relative;
   }
-  .topbar .badge {
-    display: inline-block;
-    background: var(--brand-yellow);
-    color: var(--asphalt);
-    font-family: 'Space Mono', monospace;
-    font-weight: 700;
-    font-size: 10.5px;
-    letter-spacing: 0.08em;
-    padding: 3px 8px;
-    border-radius: 3px;
-    margin-bottom: 8px;
+  .topbar .brand {
+    font-family: 'Anton', sans-serif;
+    font-weight: 400;
+    font-size: 23px;
+    letter-spacing: 0.015em;
+    color: var(--brand-yellow);
+    text-transform: uppercase;
+    line-height: 1.05;
   }
   .topbar h1 {
     font-family: 'Oswald', sans-serif;
-    font-weight: 700;
-    font-size: 20px;
-    letter-spacing: 0.01em;
-    margin: 0;
+    font-weight: 500;
+    font-size: 12.5px;
+    letter-spacing: 0.03em;
+    margin: 3px 0 0;
+    color: var(--steel);
     text-transform: uppercase;
   }
   .topbar .who {
-    font-size: 12.5px;
+    font-size: 11px;
     color: var(--steel);
-    margin-top: 4px;
+    opacity: 0.75;
+    margin-top: 2px;
   }
   .chevron {
-    height: 7px;
+    height: 6px;
     background: var(--brand-yellow);
     clip-path: polygon(0 0, 96% 0, 100% 100%, 4% 100%);
   }
@@ -332,7 +331,7 @@ function renderMessage(text) {
 function topbarHtml(title, userName) {
   return `
     <div class="topbar">
-      <div class="badge">НАБ ТЕХОБЛІК</div>
+      <div class="brand">НАБ ТехОблік</div>
       <h1>${title}</h1>
       <div class="who">Оператор: ${userName}</div>
     </div>
@@ -406,6 +405,7 @@ async function renderOperatorForm(user) {
           <div>
             <label>Кінець</label>
             <input type="number" step="0.1" class="numeric" id="end_hours" required>
+            <div class="hint-inline" id="end-hours-hint"></div>
           </div>
         </div>
 
@@ -508,8 +508,20 @@ async function renderOperatorForm(user) {
   }
 
   document.getElementById('equipment_id').addEventListener('change', applySuggestedStartHours);
-  document.getElementById('start_hours').addEventListener('input', checkDiscrepancy);
+  document.getElementById('start_hours').addEventListener('input', () => { checkDiscrepancy(); checkEndHours(); });
   applySuggestedStartHours();
+
+  function checkEndHours() {
+    const start = parseFloat(document.getElementById('start_hours').value);
+    const end = parseFloat(document.getElementById('end_hours').value);
+    const hint = document.getElementById('end-hours-hint');
+    if (!isNaN(start) && !isNaN(end) && end < start) {
+      hint.innerHTML = `<span style="color: var(--danger)">⚠ Менше за початкові (${start})</span>`;
+    } else {
+      hint.textContent = '';
+    }
+  }
+  document.getElementById('end_hours').addEventListener('input', checkEndHours);
 
   // Автовизначення відповідального при виборі об'єкта
   async function updateResponsible() {
