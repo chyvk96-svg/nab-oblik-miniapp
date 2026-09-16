@@ -5,106 +5,232 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>НАБ ТехОблік</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: var(--tg-theme-bg-color, #ffffff);
-    --text: var(--tg-theme-text-color, #000000);
-    --hint: var(--tg-theme-hint-color, #999999);
-    --card: var(--tg-theme-secondary-bg-color, #f2f2f7);
-    --accent: var(--tg-theme-button-color, #2481cc);
-    --accent-text: var(--tg-theme-button-text-color, #ffffff);
-    --border: rgba(0,0,0,0.08);
+    --asphalt: #141311;
+    --concrete: #F3F1EA;
+    --steel: #D8D4C8;
+    --brand-yellow: #F5C400;
+    --caution: #D9600A;
+    --ink: #17150F;
+    --ink-soft: #6E6A5E;
+    --danger: #C1440E;
+    --line: rgba(23,21,15,0.14);
   }
-  * { box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg);
-    color: var(--text);
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
     margin: 0;
-    padding: 16px;
+    background: var(--concrete);
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, sans-serif;
   }
-  h1 { font-size: 18px; margin: 0 0 4px; }
-  .sub { color: var(--hint); font-size: 13px; margin-bottom: 20px; }
-  .card {
-    background: var(--card);
-    border-radius: 12px;
-    padding: 16px;
-    margin-bottom: 16px;
+  body { padding-bottom: 40px; }
+
+  .topbar {
+    background: var(--asphalt);
+    color: var(--concrete);
+    padding: 18px 16px 16px;
+    position: relative;
   }
+  .topbar .eyebrow {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--brand-yellow);
+    margin-bottom: 4px;
+  }
+  .topbar h1 {
+    font-family: 'Oswald', sans-serif;
+    font-weight: 700;
+    font-size: 22px;
+    letter-spacing: 0.01em;
+    margin: 0;
+    text-transform: uppercase;
+  }
+  .topbar .who {
+    font-size: 13px;
+    color: var(--steel);
+    margin-top: 4px;
+  }
+  .chevron {
+    height: 8px;
+    background: var(--brand-yellow);
+    clip-path: polygon(0 0, 96% 0, 100% 100%, 4% 100%);
+  }
+
+  .wrap { padding: 0 16px; }
+
+  .section {
+    margin-top: 22px;
+    border-top: 3px solid var(--asphalt);
+    padding-top: 10px;
+  }
+  .section-title {
+    font-family: 'Oswald', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+    margin-bottom: 12px;
+  }
+  .section-title .n {
+    display: inline-block;
+    background: var(--asphalt);
+    color: var(--brand-yellow);
+    width: 20px;
+    height: 20px;
+    line-height: 20px;
+    text-align: center;
+    border-radius: 3px;
+    font-size: 11px;
+    margin-right: 6px;
+    font-family: 'Space Mono', monospace;
+  }
+  .section-title .icon {
+    margin-right: 4px;
+  }
+
   label {
     display: block;
-    font-size: 13px;
-    color: var(--hint);
-    margin-bottom: 6px;
-    margin-top: 14px;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    margin: 14px 0 6px;
   }
-  label:first-child { margin-top: 0; }
+  label:first-of-type { margin-top: 0; }
+
   input, select, textarea {
     width: 100%;
-    padding: 10px 12px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text);
+    padding: 11px 12px;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--ink);
     font-size: 15px;
-    font-family: inherit;
+    font-family: 'Inter', sans-serif;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--asphalt);
+    box-shadow: 0 0 0 2px rgba(245,196,0,0.35);
   }
   textarea { resize: vertical; min-height: 60px; }
+
+  .numeric {
+    font-family: 'Space Mono', monospace;
+    font-size: 17px;
+    letter-spacing: 0.01em;
+  }
+
   .row2 { display: flex; gap: 10px; }
   .row2 > div { flex: 1; }
+
+  .hint-inline {
+    font-size: 11.5px;
+    color: var(--ink-soft);
+    margin-top: 5px;
+  }
+  .hint-inline b { color: var(--ink); }
+
+  .discrepancy-box {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: #FBEAE3;
+    border: 1px solid var(--caution);
+    border-radius: 4px;
+  }
+  .discrepancy-box .flag {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--caution);
+    margin-bottom: 6px;
+  }
+
   .checkbox-row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-top: 14px;
+    gap: 10px;
+    margin-top: 16px;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
   }
-  .checkbox-row input { width: auto; }
-  .checkbox-row label { margin: 0; color: var(--text); font-size: 15px; }
-  button {
+  .checkbox-row input { width: 18px; height: 18px; }
+  .checkbox-row label { margin: 0; color: var(--ink); font-size: 14.5px; }
+
+  button[type="submit"] {
     width: 100%;
-    padding: 14px;
+    padding: 15px;
     border: none;
-    border-radius: 10px;
-    background: var(--accent);
-    color: var(--accent-text);
-    font-size: 16px;
-    font-weight: 600;
-    margin-top: 20px;
+    border-radius: 4px;
+    background: var(--brand-yellow);
+    color: var(--asphalt);
+    font-family: 'Oswald', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-top: 26px;
     cursor: pointer;
   }
-  button:disabled { opacity: 0.5; }
+  button[type="submit"]:disabled { opacity: 0.5; }
+
   .hidden { display: none !important; }
+
   .msg {
     text-align: center;
-    padding: 40px 16px;
-    color: var(--hint);
+    padding: 60px 20px;
+    color: var(--ink-soft);
+    font-size: 14px;
   }
+
   .success-box {
     text-align: center;
-    padding: 30px 16px;
+    padding: 40px 16px;
   }
-  .success-box .id {
-    font-size: 20px;
+  .success-box .stamp {
+    display: inline-block;
+    border: 3px solid var(--asphalt);
+    color: var(--asphalt);
+    background: var(--brand-yellow);
+    font-family: 'Oswald', sans-serif;
     font-weight: 700;
-    color: var(--accent);
-    margin: 12px 0;
+    font-size: 22px;
+    letter-spacing: 0.05em;
+    padding: 10px 18px;
+    border-radius: 4px;
+    margin: 16px 0;
+    transform: rotate(-2deg);
   }
-  .error-text {
-    color: #e53935;
-    font-size: 13px;
+  .success-box .status {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    color: var(--ink-soft);
     margin-top: 10px;
+  }
+
+  .error-text {
+    color: var(--danger);
+    font-size: 13px;
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: #FBEAE3;
+    border-radius: 4px;
+    border: 1px solid var(--danger);
   }
 </style>
 </head>
 <body>
 
 <div id="app">
-  <div class="msg" id="loading">Завантаження...</div>
+  <div class="msg">Завантаження...</div>
 </div>
 
 <script>
 const SUPABASE_URL = 'https://ypnfujxcwgfjmewrsqus.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_MJXHjWXDkky9Xhvh7i-Viw_Q4Gedb8r';
+const HOURS_EPSILON = 0.05; // допустима похибка при порівнянні мотогодин
 
 const tg = window.Telegram.WebApp;
 tg.ready();
@@ -112,7 +238,7 @@ tg.expand();
 
 const app = document.getElementById('app');
 
-// ---------- Допоміжні функції роботи з Supabase REST API ----------
+// ---------- Supabase REST API helpers ----------
 
 async function supaGet(table, query) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
@@ -198,6 +324,17 @@ function renderMessage(text) {
   app.innerHTML = `<div class="msg">${text}</div>`;
 }
 
+function topbarHtml(title, userName) {
+  return `
+    <div class="topbar">
+      <div class="eyebrow">НАБ ТЕХОБЛІК</div>
+      <h1>${title}</h1>
+      <div class="who">Оператор: ${userName}</div>
+    </div>
+    <div class="chevron"></div>
+  `;
+}
+
 // ---------- Екран оператора: форма щоденного звіту ----------
 
 async function renderOperatorForm(user) {
@@ -206,7 +343,7 @@ async function renderOperatorForm(user) {
   try {
     myEquipment = await supaGet(
       'user_equipment',
-      `user_id=eq.${user.id}&status=eq.Активна&select=equipment_id,equipment(id,name)`
+      `user_id=eq.${user.id}&status=eq.Активна&select=equipment_id,equipment(id,name,confirmed_hours)`
     );
     objects = await supaGet('objects', `status=eq.Активний&select=id,name`);
   } catch (e) {
@@ -219,6 +356,9 @@ async function renderOperatorForm(user) {
     return;
   }
 
+  const confirmedHoursMap = {};
+  myEquipment.forEach(ue => { confirmedHoursMap[ue.equipment.id] = ue.equipment.confirmed_hours; });
+
   const today = new Date().toISOString().split('T')[0];
 
   const equipmentOptions = myEquipment
@@ -229,11 +369,13 @@ async function renderOperatorForm(user) {
     .join('');
 
   app.innerHTML = `
-    <h1>Внести дані</h1>
-    <div class="sub">Оператор: ${user.full_name}</div>
-
+    ${topbarHtml('Внести дані', user.full_name)}
+    <div class="wrap">
     <form id="report-form">
-      <div class="card">
+
+      <div class="section">
+        <div class="section-title"><span class="n">1</span><span class="icon">🚜</span>Техніка та об'єкт</div>
+
         <label>Дата роботи</label>
         <input type="date" id="work_date" value="${today}" required>
 
@@ -247,22 +389,31 @@ async function renderOperatorForm(user) {
         <input type="text" id="responsible_display" disabled placeholder="Визначається автоматично">
       </div>
 
-      <div class="card">
-        <label>Мотогодини</label>
+      <div class="section">
+        <div class="section-title"><span class="n">2</span><span class="icon">⏱️</span>Мотогодини</div>
+
         <div class="row2">
           <div>
             <label>Початок</label>
-            <input type="number" step="0.1" id="start_hours" required>
+            <input type="number" step="0.1" class="numeric" id="start_hours" required>
+            <div class="hint-inline" id="start-hours-hint"></div>
           </div>
           <div>
             <label>Кінець</label>
-            <input type="number" step="0.1" id="end_hours" required>
+            <input type="number" step="0.1" class="numeric" id="end_hours" required>
           </div>
+        </div>
+
+        <div class="discrepancy-box hidden" id="discrepancy-box">
+          <div class="flag">⚠ ЗНАЧЕННЯ ВІДРІЗНЯЄТЬСЯ ВІД ОЧІКУВАНОГО</div>
+          <label style="margin-top:0">Причина розбіжності</label>
+          <textarea id="start_hours_note" placeholder="Наприклад: лічильник скинуто, попередній запис невірний тощо"></textarea>
         </div>
       </div>
 
-      <div class="card">
-        <label>Час роботи</label>
+      <div class="section">
+        <div class="section-title"><span class="n">3</span><span class="icon">🕐</span>Час роботи</div>
+
         <div class="row2">
           <div>
             <label>Початок</label>
@@ -277,21 +428,24 @@ async function renderOperatorForm(user) {
         <input type="number" step="0.1" id="lunch_hours" value="0">
       </div>
 
-      <div class="card">
-        <label>Переїзд, год</label>
+      <div class="section">
+        <div class="section-title"><span class="n">4</span><span class="icon">🚗</span>Переїзд</div>
+        <label>Години</label>
         <input type="number" step="0.1" id="travel_hours" value="0">
         <label>Опис маршруту</label>
         <input type="text" id="travel_route" placeholder="Звідки → куди">
       </div>
 
-      <div class="card">
-        <label>Простій, год</label>
+      <div class="section">
+        <div class="section-title"><span class="n">5</span><span class="icon">⏸</span>Простій</div>
+        <label>Години</label>
         <input type="number" step="0.1" id="downtime_hours" value="0">
-        <label>Причина простою</label>
+        <label>Причина</label>
         <input type="text" id="downtime_reason">
       </div>
 
-      <div class="card">
+      <div class="section">
+        <div class="section-title"><span class="n">6</span><span class="icon">⛽</span>Заправка та поломки</div>
         <label>Заправка, л</label>
         <input type="number" step="0.1" id="fueling_liters" value="0">
 
@@ -306,20 +460,49 @@ async function renderOperatorForm(user) {
         </div>
       </div>
 
-      <div class="card">
-        <label>Примітка</label>
-        <textarea id="operator_note"></textarea>
+      <div class="section">
+        <div class="section-title"><span class="n">7</span><span class="icon">📝</span>Примітка</div>
+        <textarea id="operator_note" placeholder="Довільний коментар до звіту"></textarea>
       </div>
 
       <button type="submit" id="submit-btn">Подати звіт</button>
       <div class="error-text hidden" id="error-box"></div>
+
     </form>
+    </div>
   `;
 
   // Показ/приховування блоку ремонту
   document.getElementById('has_breakdown').addEventListener('change', (e) => {
     document.getElementById('repair-block').classList.toggle('hidden', !e.target.checked);
   });
+
+  // Підказка і автопідстановка початкових мотогодин при виборі техніки
+  function applySuggestedStartHours() {
+    const equipmentId = document.getElementById('equipment_id').value;
+    const confirmed = confirmedHoursMap[equipmentId];
+    const startInput = document.getElementById('start_hours');
+    const hint = document.getElementById('start-hours-hint');
+
+    startInput.dataset.suggested = confirmed;
+    startInput.value = confirmed;
+    hint.innerHTML = `Підтверджене значення техніки: <b>${confirmed}</b>`;
+    checkDiscrepancy();
+  }
+
+  function checkDiscrepancy() {
+    const startInput = document.getElementById('start_hours');
+    const suggested = parseFloat(startInput.dataset.suggested);
+    const current = parseFloat(startInput.value);
+    const box = document.getElementById('discrepancy-box');
+    const isDifferent = !isNaN(current) && !isNaN(suggested) && Math.abs(current - suggested) > HOURS_EPSILON;
+    box.classList.toggle('hidden', !isDifferent);
+    if (!isDifferent) document.getElementById('start_hours_note').value = '';
+  }
+
+  document.getElementById('equipment_id').addEventListener('change', applySuggestedStartHours);
+  document.getElementById('start_hours').addEventListener('input', checkDiscrepancy);
+  applySuggestedStartHours();
 
   // Автовизначення відповідального при виборі об'єкта
   async function updateResponsible() {
@@ -344,7 +527,7 @@ async function renderOperatorForm(user) {
   }
 
   document.getElementById('object_id').addEventListener('change', updateResponsible);
-  await updateResponsible(); // одразу для першого об'єкта в списку
+  await updateResponsible();
 
   // Відправка форми
   document.getElementById('report-form').addEventListener('submit', async (e) => {
@@ -352,8 +535,6 @@ async function renderOperatorForm(user) {
     const submitBtn = document.getElementById('submit-btn');
     const errorBox = document.getElementById('error-box');
     errorBox.classList.add('hidden');
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Відправка...';
 
     try {
       const responsibleId = document.getElementById('responsible_display').dataset.userId;
@@ -361,11 +542,19 @@ async function renderOperatorForm(user) {
         throw new Error('Не визначено відповідального за цей об\'єкт.');
       }
 
+      const discrepancyVisible = !document.getElementById('discrepancy-box').classList.contains('hidden');
+      const startHoursNote = document.getElementById('start_hours_note').value.trim();
+      if (discrepancyVisible && !startHoursNote) {
+        throw new Error('Вкажи причину розбіжності мотогодин перед відправкою.');
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Відправка...';
+
       const startTime = document.getElementById('start_time').value;
       const endTime = document.getElementById('end_time').value;
       const lunchHours = parseFloat(document.getElementById('lunch_hours').value) || 0;
 
-      // Розрахунок людиногодин: різниця часу мінус обід
       const [sh, sm] = startTime.split(':').map(Number);
       const [eh, em] = endTime.split(':').map(Number);
       let diffHours = (eh + em / 60) - (sh + sm / 60);
@@ -383,6 +572,7 @@ async function renderOperatorForm(user) {
         responsible_id: responsibleId,
         start_hours: parseFloat(document.getElementById('start_hours').value),
         end_hours: parseFloat(document.getElementById('end_hours').value),
+        start_hours_note: discrepancyVisible ? startHoursNote : null,
         start_time: startTime,
         end_time: endTime,
         lunch_hours: lunchHours,
@@ -400,10 +590,12 @@ async function renderOperatorForm(user) {
       await supaInsert('daily_reports', payload);
 
       app.innerHTML = `
+        <div class="wrap">
         <div class="success-box">
-          <div>Звіт успішно подано!</div>
-          <div class="id">${newId}</div>
-          <div class="sub">Статус: Очікує відповідального</div>
+          <div>✅ Звіт успішно подано</div>
+          <div class="stamp">${newId}</div>
+          <div class="status">СТАТУС: ОЧІКУЄ ВІДПОВІДАЛЬНОГО</div>
+        </div>
         </div>
       `;
     } catch (err) {
