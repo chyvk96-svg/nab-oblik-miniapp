@@ -7,12 +7,12 @@ function renderMessage(text) {
   app.innerHTML = `<div class="msg">${text}</div>`;
 }
 
-function topbarHtml(title, userName) {
+function topbarHtml(title, subtitle) {
   return `
     <div class="topbar">
       <div class="brand">НАБ ТехОблік</div>
       <h1>${title}</h1>
-      <div class="who">Оператор: ${userName}</div>
+      <div class="who">${subtitle}</div>
     </div>
     <div class="chevron"></div>
   `;
