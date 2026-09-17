@@ -34,6 +34,8 @@ async function main() {
 
   if (currentUser.role === 'Оператор') {
     renderOperatorHome(currentUser);
+  } else if (currentUser.role === 'Відповідальний') {
+    renderResponsibleHome(currentUser);
   } else {
     renderMessage(`Роль "${currentUser.role}" поки не реалізована в цій версії Mini App. Скоро буде.`);
   }
