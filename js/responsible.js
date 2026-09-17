@@ -36,11 +36,20 @@ function reportDetailsHtml(r) {
   const breakdownLine = r.has_breakdown
     ? `<div class="detail-row"><span class="label">Поломка:</span> ${r.breakdown_description || '—'}</div>`
     : '';
+  const repairLine = (r.has_breakdown && r.repair_hours && r.repair_hours > 0)
+    ? `<div class="detail-row"><span class="label">Час ремонту:</span> ${r.repair_hours} год</div>`
+    : '';
   const startNoteLine = r.start_hours_note
     ? `<div class="detail-row"><span class="label">Причина розбіжності мотогодин:</span> ${r.start_hours_note}</div>`
     : '';
   const downtimeLine = (r.downtime_hours && r.downtime_hours > 0)
     ? `<div class="detail-row"><span class="label">Простій:</span> ${r.downtime_hours} год — ${r.downtime_reason || '—'}</div>`
+    : '';
+  const travelLine = (r.travel_hours && r.travel_hours > 0)
+    ? `<div class="detail-row"><span class="label">Переїзд:</span> ${r.travel_hours} год${r.travel_route ? ' — ' + r.travel_route : ''}</div>`
+    : '';
+  const fuelingLine = (r.fueling_liters && r.fueling_liters > 0)
+    ? `<div class="detail-row"><span class="label">Заправка:</span> ${r.fueling_liters} л</div>`
     : '';
   const noteLine = r.operator_note
     ? `<div class="detail-row"><span class="label">Примітка:</span> ${r.operator_note}</div>`
@@ -51,8 +60,12 @@ function reportDetailsHtml(r) {
     <div class="meta">${r.equipment?.name || '—'} · ${r.objects?.name || '—'}</div>
     <div class="hours">${r.start_hours} → ${r.end_hours} год (разом ${r.total_moto_hours})</div>
     <div class="detail-row"><span class="label">Час роботи:</span> ${r.start_time} – ${r.end_time}, людиногодин: ${r.total_person_hours}</div>
+    <div class="detail-row"><span class="label">Обід:</span> ${r.lunch_hours} год</div>
+    ${travelLine}
     ${downtimeLine}
+    ${fuelingLine}
     ${breakdownLine}
+    ${repairLine}
     ${startNoteLine}
     ${noteLine}
     <div class="meta" style="margin-top:4px">Подано: ${formatDateTimeUA(r.submitted_at)}</div>
@@ -62,7 +75,8 @@ function reportDetailsHtml(r) {
 // ---------- Мої підтвердження: звіти, що очікують дії ----------
 
 const REPORT_SELECT_FIELDS = 'id,work_date,status,start_hours,end_hours,total_moto_hours,start_time,end_time,' +
-  'total_person_hours,downtime_hours,downtime_reason,has_breakdown,breakdown_description,start_hours_note,' +
+  'lunch_hours,total_person_hours,travel_hours,travel_route,downtime_hours,downtime_reason,fueling_liters,' +
+  'has_breakdown,breakdown_description,repair_hours,start_hours_note,' +
   'operator_note,submitted_at,equipment(name),objects(name),users!daily_reports_operator_id_fkey(full_name)';
 
 async function renderPendingApprovals(user) {
