@@ -6,7 +6,7 @@ const HOURS_EPSILON = 0.05; // допустима похибка при порі
 
 function renderOperatorHome(user) {
   app.innerHTML = `
-    ${topbarHtml('Головне меню', user.full_name)}
+    ${topbarHtml('Головне меню', `Оператор: ${user.full_name}`)}
     <div class="menu-list">
       <button class="menu-btn" id="btn-new-report">
         <span class="emoji">🚜</span>
@@ -32,7 +32,7 @@ function renderOperatorHome(user) {
 
 async function renderMyReports(user) {
   app.innerHTML = `
-    ${topbarHtml('Мої записи', user.full_name)}
+    ${topbarHtml('Мої записи', `Оператор: ${user.full_name}`)}
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-menu" style="padding:0 0 14px">← Назад до меню</div>
       <div id="reports-list" class="msg">Завантаження...</div>
@@ -106,7 +106,7 @@ async function renderOperatorForm(user) {
     .join('');
 
   app.innerHTML = `
-    ${topbarHtml('Внести дані', user.full_name)}
+    ${topbarHtml('Внести дані', `Оператор: ${user.full_name}`)}
     <div class="wrap">
     <div class="back-link" id="back-to-menu-form" style="padding:14px 0 0">← Назад до меню</div>
     <form id="report-form">
