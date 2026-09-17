@@ -31,6 +31,24 @@ async function supaInsert(table, data) {
   return res.json();
 }
 
+async function supaUpdate(table, filterQuery, data) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filterQuery}`, {
+    method: 'PATCH',
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Помилка оновлення ${table}: ${errText}`);
+  }
+  return res.json();
+}
+
 async function supaRpc(fnName, params) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fnName}`, {
     method: 'POST',
