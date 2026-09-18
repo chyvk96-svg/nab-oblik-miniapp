@@ -76,6 +76,12 @@ async function renderAddObject(user) {
         <label>Назва об'єкта</label>
         <input type="text" id="object_name" required placeholder="Наприклад: вул. Шевченка, 12">
 
+        <label>Скорочена назва</label>
+        <input type="text" id="object_short_name" placeholder="Необов'язково">
+
+        <label>Дата початку</label>
+        <input type="date" id="object_start_date">
+
         <label>Відповідальний за об'єкт</label>
         <select id="object_responsible_id" required>
           ${respUsers.map(u => `<option value="${u.id}">${u.full_name}</option>`).join('')}
@@ -91,11 +97,16 @@ async function renderAddObject(user) {
   const submitBtn = document.getElementById('add-object-submit-btn');
   const errorBox = document.getElementById('add-object-error-box');
 
+  // За замовчуванням дата початку — сьогодні
+  document.getElementById('object_start_date').value = new Date().toISOString().slice(0, 10);
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     errorBox.classList.add('hidden');
 
     const name = document.getElementById('object_name').value.trim();
+    const shortName = document.getElementById('object_short_name').value.trim();
+    const startDate = document.getElementById('object_start_date').value;
     const responsibleId = document.getElementById('object_responsible_id').value;
 
     if (!name) {
@@ -112,6 +123,8 @@ async function renderAddObject(user) {
       await supaInsert('objects', {
         id: objectId,
         name: name,
+        short_name: shortName || null,
+        start_date: startDate || null,
         status: 'Активний'
       });
 
