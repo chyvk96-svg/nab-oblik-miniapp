@@ -68,13 +68,41 @@ async function renderMyReports(user) {
       <div class="meta">${r.equipment?.name || '—'} · ${r.objects?.name || '—'}</div>
       <div class="hours">${r.start_hours} → ${r.end_hours} год (разом ${r.total_moto_hours})</div>
       <div class="meta" style="margin-top:4px">Подано: ${formatDateTimeUA(r.submitted_at)}</div>
+      ${r.status === 'Повернено на коригування'
+        ? `<button class="btn-confirm" style="margin-top:10px" data-edit-id="${r.id}">Редагувати</button>`
+        : ''}
     </div>
   `).join('');
+
+  listEl.querySelectorAll('[data-edit-id]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = 'Завантаження...';
+      try {
+        const rows = await supaGet('daily_reports', `id=eq.${btn.dataset.editId}&select=*`);
+        if (rows && rows.length > 0) {
+          renderOperatorForm(user, rows[0]);
+        } else {
+          alert('Не вдалося знайти звіт.');
+          btn.disabled = false;
+          btn.textContent = 'Редагувати';
+        }
+      } catch (e) {
+        alert('Помилка завантаження: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = 'Редагувати';
+      }
+    });
+  });
 }
 
 // ---------- Екран оператора: форма щоденного звіту ----------
+// existingReport: якщо передано — форма працює в режимі редагування
+// вже поданого (і відхиленого) звіту, замість створення нового.
 
-async function renderOperatorForm(user) {
+async function renderOperatorForm(user, existingReport = null) {
+  const isEdit = existingReport !== null;
+
   let myEquipment, objects;
 
   try {
@@ -99,14 +127,14 @@ async function renderOperatorForm(user) {
   const today = new Date().toISOString().split('T')[0];
 
   const equipmentOptions = myEquipment
-    .map(ue => `<option value="${ue.equipment.id}">${ue.equipment.name}</option>`)
+    .map(ue => `<option value="${ue.equipment.id}"${isEdit && existingReport.equipment_id === ue.equipment.id ? ' selected' : ''}>${ue.equipment.name}</option>`)
     .join('');
   const objectOptions = objects
-    .map(o => `<option value="${o.id}">${o.name}</option>`)
+    .map(o => `<option value="${o.id}"${isEdit && existingReport.object_id === o.id ? ' selected' : ''}>${o.name}</option>`)
     .join('');
 
   app.innerHTML = `
-    ${topbarHtml('Внести дані', `Оператор: ${user.full_name}`)}
+    ${topbarHtml(isEdit ? 'Редагування звіту' : 'Внести дані', `Оператор: ${user.full_name}`)}
     <div class="wrap">
     <div class="back-link" id="back-to-menu-form" style="padding:14px 0 0">← Назад до меню</div>
     <form id="report-form">
@@ -115,7 +143,7 @@ async function renderOperatorForm(user) {
         <div class="section-title"><span class="n">1</span><span class="icon">🚜</span>Техніка та об'єкт</div>
 
         <label>Дата роботи</label>
-        <input type="date" id="work_date" value="${today}" required>
+        <input type="date" id="work_date" value="${isEdit ? existingReport.work_date : today}" required>
 
         <label>Техніка</label>
         <select id="equipment_id" required>${equipmentOptions}</select>
@@ -138,7 +166,7 @@ async function renderOperatorForm(user) {
           </div>
           <div>
             <label>Кінець</label>
-            <input type="number" step="0.1" class="numeric" id="end_hours" required>
+            <input type="number" step="0.1" class="numeric" id="end_hours" value="${isEdit ? existingReport.end_hours : ''}" required>
             <div class="hint-inline" id="end-hours-hint"></div>
           </div>
         </div>
@@ -146,7 +174,7 @@ async function renderOperatorForm(user) {
         <div class="discrepancy-box hidden" id="discrepancy-box">
           <div class="flag">⚠ ЗНАЧЕННЯ ВІДРІЗНЯЄТЬСЯ ВІД ОЧІКУВАНОГО</div>
           <label style="margin-top:0">Причина розбіжності</label>
-          <textarea id="start_hours_note" placeholder="Наприклад: лічильник скинуто, попередній запис невірний тощо"></textarea>
+          <textarea id="start_hours_note" placeholder="Наприклад: лічильник скинуто, попередній запис невірний тощо">${isEdit && existingReport.start_hours_note ? existingReport.start_hours_note : ''}</textarea>
         </div>
       </div>
 
@@ -156,67 +184,89 @@ async function renderOperatorForm(user) {
         <div class="row2">
           <div>
             <label>Початок</label>
-            <input type="time" id="start_time" required>
+            <input type="time" id="start_time" value="${isEdit ? formatTimeUA(existingReport.start_time) : ''}" required>
           </div>
           <div>
             <label>Кінець</label>
-            <input type="time" id="end_time" required>
+            <input type="time" id="end_time" value="${isEdit ? formatTimeUA(existingReport.end_time) : ''}" required>
           </div>
         </div>
         <label>Обід, год</label>
-        <input type="number" step="0.1" id="lunch_hours" value="0">
+        <input type="number" step="0.1" id="lunch_hours" value="${isEdit ? existingReport.lunch_hours : '0'}">
       </div>
 
       <div class="section">
         <div class="section-title"><span class="n">4</span><span class="icon">🚗</span>Переїзд</div>
         <label>Години</label>
-        <input type="number" step="0.1" id="travel_hours" value="0">
+        <input type="number" step="0.1" id="travel_hours" value="${isEdit ? (existingReport.travel_hours || 0) : '0'}">
         <label>Опис маршруту</label>
-        <input type="text" id="travel_route" placeholder="Звідки → куди">
+        <input type="text" id="travel_route" placeholder="Звідки → куди" value="${isEdit && existingReport.travel_route ? existingReport.travel_route : ''}">
       </div>
 
       <div class="section">
-        <div class="section-title"><span class="n">5</span><span class="icon">⏸</span>Простій</div>
+        <div class="section-title"><span class="n">5</span><span class="icon">🚌</span>Перевезення людей</div>
+
+        <div class="checkbox-row" style="margin-top:0; border-top:none; padding-top:0">
+          <input type="checkbox" id="transported_people"${isEdit && existingReport.transported_people ? ' checked' : ''}>
+          <label for="transported_people">Перевозив людей (автобус)</label>
+        </div>
+
+        <div id="transport-block" class="${isEdit && existingReport.transported_people ? '' : 'hidden'}">
+          <label>Маршрут</label>
+          <input type="text" id="transport_route" placeholder="Звідки → куди" value="${isEdit && existingReport.transport_route ? existingReport.transport_route : ''}">
+          <label>Години</label>
+          <input type="number" step="0.1" id="transport_hours" value="${isEdit && existingReport.transport_hours ? existingReport.transport_hours : '0'}">
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><span class="n">6</span><span class="icon">⏸</span>Простій</div>
         <label>Години</label>
-        <input type="number" step="0.1" id="downtime_hours" value="0">
+        <input type="number" step="0.1" id="downtime_hours" value="${isEdit ? (existingReport.downtime_hours || 0) : '0'}">
         <label>Причина</label>
-        <input type="text" id="downtime_reason">
+        <input type="text" id="downtime_reason" value="${isEdit && existingReport.downtime_reason ? existingReport.downtime_reason : ''}">
       </div>
 
       <div class="section">
-        <div class="section-title"><span class="n">6</span><span class="icon">⛽</span>Заправка та поломки</div>
+        <div class="section-title"><span class="n">7</span><span class="icon">⛽</span>Заправка та поломки</div>
         <label>Заправка, л</label>
-        <input type="number" step="0.1" id="fueling_liters" value="0">
+        <input type="number" step="0.1" id="fueling_liters" value="${isEdit ? (existingReport.fueling_liters || 0) : '0'}">
+        <label>Звідки заправились</label>
+        <input type="text" id="fueling_source" placeholder="Наша заправна станція / з іншої техніки / каністри тощо" value="${isEdit && existingReport.fueling_source ? existingReport.fueling_source : ''}">
 
         <div class="checkbox-row">
-          <input type="checkbox" id="has_breakdown">
+          <input type="checkbox" id="has_breakdown"${isEdit && existingReport.has_breakdown ? ' checked' : ''}>
           <label for="has_breakdown">Була поломка</label>
         </div>
 
-        <div id="repair-block" class="hidden">
+        <div id="repair-block" class="${isEdit && existingReport.has_breakdown ? '' : 'hidden'}">
           <label>Опис поломки</label>
-          <textarea id="breakdown_description" placeholder="Що сталось, який вузол/компонент"></textarea>
+          <textarea id="breakdown_description" placeholder="Що сталось, який вузол/компонент">${isEdit && existingReport.breakdown_description ? existingReport.breakdown_description : ''}</textarea>
           <label>Ремонт, год</label>
-          <input type="number" step="0.1" id="repair_hours" value="0">
+          <input type="number" step="0.1" id="repair_hours" value="${isEdit ? (existingReport.repair_hours || 0) : '0'}">
         </div>
       </div>
 
       <div class="section">
-        <div class="section-title"><span class="n">7</span><span class="icon">📝</span>Примітка</div>
-        <textarea id="operator_note" placeholder="Довільний коментар до звіту"></textarea>
+        <div class="section-title"><span class="n">8</span><span class="icon">📝</span>Примітка</div>
+        <textarea id="operator_note" placeholder="Довільний коментар до звіту">${isEdit && existingReport.operator_note ? existingReport.operator_note : ''}</textarea>
       </div>
 
-      <button type="submit" id="submit-btn">Подати звіт</button>
+      <button type="submit" id="submit-btn">${isEdit ? 'Зберегти зміни' : 'Подати звіт'}</button>
       <div class="error-text hidden" id="error-box"></div>
 
     </form>
     </div>
   `;
 
-  // Показ/приховування блоку ремонту
   document.getElementById('back-to-menu-form').addEventListener('click', () => renderOperatorHome(user));
+
   document.getElementById('has_breakdown').addEventListener('change', (e) => {
     document.getElementById('repair-block').classList.toggle('hidden', !e.target.checked);
+  });
+
+  document.getElementById('transported_people').addEventListener('change', (e) => {
+    document.getElementById('transport-block').classList.toggle('hidden', !e.target.checked);
   });
 
   // Підказка і автопідстановка початкових мотогодин при виборі техніки
@@ -239,12 +289,19 @@ async function renderOperatorForm(user) {
     const box = document.getElementById('discrepancy-box');
     const isDifferent = !isNaN(current) && !isNaN(suggested) && Math.abs(current - suggested) > HOURS_EPSILON;
     box.classList.toggle('hidden', !isDifferent);
-    if (!isDifferent) document.getElementById('start_hours_note').value = '';
   }
 
   document.getElementById('equipment_id').addEventListener('change', applySuggestedStartHours);
   document.getElementById('start_hours').addEventListener('input', () => { checkDiscrepancy(); checkEndHours(); });
+
   applySuggestedStartHours();
+
+  // У режимі редагування — підставляємо реальне значення, яке оператор
+  // вводив раніше (воно могло відрізнятись від підтвердженого техніки).
+  if (isEdit) {
+    document.getElementById('start_hours').value = existingReport.start_hours;
+    checkDiscrepancy();
+  }
 
   function checkEndHours() {
     const start = parseFloat(document.getElementById('start_hours').value);
@@ -257,6 +314,7 @@ async function renderOperatorForm(user) {
     }
   }
   document.getElementById('end_hours').addEventListener('input', checkEndHours);
+  checkEndHours();
 
   // Автовизначення відповідального при виборі об'єкта
   async function updateResponsible() {
@@ -314,8 +372,15 @@ async function renderOperatorForm(user) {
         throw new Error('Опиши, що сталось при поломці.');
       }
 
+      const transportedPeople = document.getElementById('transported_people').checked;
+      const transportRoute = document.getElementById('transport_route').value.trim();
+      const transportHours = parseFloat(document.getElementById('transport_hours').value) || 0;
+      if (transportedPeople && (!transportRoute || transportHours <= 0)) {
+        throw new Error('Вкажи маршрут і години перевезення людей.');
+      }
+
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Відправка...';
+      submitBtn.textContent = isEdit ? 'Збереження...' : 'Відправка...';
 
       const startTime = document.getElementById('start_time').value;
       const endTime = document.getElementById('end_time').value;
@@ -327,17 +392,14 @@ async function renderOperatorForm(user) {
       if (diffHours < 0) diffHours += 24;
       const totalPersonHours = Math.round((diffHours - lunchHours) * 100) / 100;
 
-      const newId = await supaRpc('next_id', { p_prefix: 'REP' });
-
       const payload = {
-        id: newId,
         work_date: document.getElementById('work_date').value,
         operator_id: user.id,
         equipment_id: document.getElementById('equipment_id').value,
         object_id: document.getElementById('object_id').value,
         responsible_id: responsibleId,
-        start_hours: parseFloat(document.getElementById('start_hours').value),
-        end_hours: parseFloat(document.getElementById('end_hours').value),
+        start_hours: startHoursVal,
+        end_hours: endHoursVal,
         start_hours_note: discrepancyVisible ? startHoursNote : null,
         start_time: startTime,
         end_time: endTime,
@@ -345,22 +407,48 @@ async function renderOperatorForm(user) {
         total_person_hours: totalPersonHours,
         travel_hours: parseFloat(document.getElementById('travel_hours').value) || 0,
         travel_route: document.getElementById('travel_route').value || null,
+        transported_people: transportedPeople,
+        transport_route: transportedPeople ? transportRoute : null,
+        transport_hours: transportedPeople ? transportHours : null,
         downtime_hours: parseFloat(document.getElementById('downtime_hours').value) || 0,
         downtime_reason: document.getElementById('downtime_reason').value || null,
         fueling_liters: parseFloat(document.getElementById('fueling_liters').value) || 0,
+        fueling_source: document.getElementById('fueling_source').value || null,
         has_breakdown: hasBreakdown,
         breakdown_description: hasBreakdown ? breakdownDescription : null,
         repair_hours: parseFloat(document.getElementById('repair_hours')?.value) || 0,
         operator_note: document.getElementById('operator_note').value || null
       };
 
-      await supaInsert('daily_reports', payload);
+      let reportId;
+
+      if (isEdit) {
+        reportId = existingReport.id;
+
+        // Зберігаємо знімок старих даних перед перезаписом (аудиторський слід)
+        const editLogId = await supaRpc('next_id', { p_prefix: 'EDIT' });
+        await supaInsert('report_edit_log', {
+          id: editLogId,
+          report_id: reportId,
+          edited_by: user.id,
+          old_data: existingReport
+        });
+
+        payload.status = 'Очікує відповідального';
+        payload.final_closed_at = null;
+
+        await supaUpdate('daily_reports', `id=eq.${reportId}`, payload);
+      } else {
+        reportId = await supaRpc('next_id', { p_prefix: 'REP' });
+        payload.id = reportId;
+        await supaInsert('daily_reports', payload);
+      }
 
       app.innerHTML = `
         <div class="wrap">
         <div class="success-box">
-          <div>✅ Звіт успішно подано</div>
-          <div class="stamp">${newId}</div>
+          <div>✅ ${isEdit ? 'Звіт оновлено і повторно відправлено' : 'Звіт успішно подано'}</div>
+          <div class="stamp">${reportId}</div>
           <div class="status">СТАТУС: ОЧІКУЄ ВІДПОВІДАЛЬНОГО</div>
         </div>
         <button type="button" id="back-home-btn" style="background:var(--asphalt);color:var(--brand-yellow);width:100%;padding:14px;border:none;border-radius:4px;font-family:'Oswald',sans-serif;font-weight:600;font-size:14px;text-transform:uppercase;letter-spacing:0.03em;cursor:pointer">На головну</button>
@@ -371,7 +459,7 @@ async function renderOperatorForm(user) {
       errorBox.textContent = err.message;
       errorBox.classList.remove('hidden');
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Подати звіт';
+      submitBtn.textContent = isEdit ? 'Зберегти зміни' : 'Подати звіт';
     }
   });
 }
