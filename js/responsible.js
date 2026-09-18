@@ -59,7 +59,7 @@ function reportDetailsHtml(r) {
     <div class="operator-name">${r.users?.full_name || '—'}</div>
     <div class="meta">${r.equipment?.name || '—'} · ${r.objects?.name || '—'}</div>
     <div class="hours">${r.start_hours} → ${r.end_hours} год (разом ${r.total_moto_hours})</div>
-    <div class="detail-row"><span class="label">Час роботи:</span> ${r.start_time} – ${r.end_time}, людиногодин: ${r.total_person_hours}</div>
+    <div class="detail-row"><span class="label">Час роботи:</span> ${formatTimeUA(r.start_time)} – ${formatTimeUA(r.end_time)}, людиногодин: ${r.total_person_hours}</div>
     <div class="detail-row"><span class="label">Обід:</span> ${r.lunch_hours} год</div>
     ${travelLine}
     ${downtimeLine}
@@ -74,7 +74,7 @@ function reportDetailsHtml(r) {
 
 // ---------- Мої підтвердження: звіти, що очікують дії ----------
 
-const REPORT_SELECT_FIELDS = 'id,work_date,status,start_hours,end_hours,total_moto_hours,start_time,end_time,' +
+const REPORT_SELECT_FIELDS = 'id,work_date,status,equipment_id,start_hours,end_hours,total_moto_hours,start_time,end_time,' +
   'lunch_hours,total_person_hours,travel_hours,travel_route,downtime_hours,downtime_reason,fueling_liters,' +
   'has_breakdown,breakdown_description,repair_hours,start_hours_note,' +
   'operator_note,submitted_at,equipment(name),objects(name),users!daily_reports_operator_id_fkey(full_name)';
@@ -116,7 +116,7 @@ async function renderPendingApprovals(user) {
       </div>
       ${reportDetailsHtml(r)}
       <div class="approval-actions">
-        <button class="btn-confirm" data-report-id="${r.id}">Підтвердити</button>
+        <button class="btn-confirm" data-report-id="${r.id}" data-equipment-id="${r.equipment_id}" data-end-hours="${r.end_hours}">Підтвердити</button>
         <button class="btn-reject" data-report-id="${r.id}">На коригування</button>
       </div>
       <div class="reject-box hidden" id="reject-box-${r.id}">
@@ -128,7 +128,13 @@ async function renderPendingApprovals(user) {
   `).join('');
 
   listEl.querySelectorAll('.btn-confirm').forEach(btn => {
-    btn.addEventListener('click', () => confirmReport(user, btn.dataset.reportId, btn));
+    btn.addEventListener('click', () => confirmReport(
+      user,
+      btn.dataset.reportId,
+      btn.dataset.equipmentId,
+      parseFloat(btn.dataset.endHours),
+      btn
+    ));
   });
   listEl.querySelectorAll('.btn-reject').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -141,7 +147,7 @@ async function renderPendingApprovals(user) {
   });
 }
 
-async function confirmReport(user, reportId, btn) {
+async function confirmReport(user, reportId, equipmentId, endHours, btn) {
   btn.disabled = true;
   btn.textContent = 'Обробка...';
   try {
@@ -159,8 +165,15 @@ async function confirmReport(user, reportId, btn) {
       status: 'Записано'
     });
 
+    // Підтвердження відповідальним тепер є фінальним кроком:
+    // одразу закриваємо звіт і оновлюємо офіційні мотогодини техніки.
     await supaUpdate('daily_reports', `id=eq.${reportId}`, {
-      status: 'Підтверджено відповідальним'
+      status: 'Фінально підтверджено',
+      final_closed_at: new Date().toISOString()
+    });
+
+    await supaUpdate('equipment', `id=eq.${equipmentId}`, {
+      confirmed_hours: endHours
     });
 
     document.getElementById(`card-${reportId}`).remove();
