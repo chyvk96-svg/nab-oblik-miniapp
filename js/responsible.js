@@ -48,8 +48,11 @@ function reportDetailsHtml(r) {
   const travelLine = (r.travel_hours && r.travel_hours > 0)
     ? `<div class="detail-row"><span class="label">Переїзд:</span> ${r.travel_hours} год${r.travel_route ? ' — ' + r.travel_route : ''}</div>`
     : '';
+  const transportLine = r.transported_people
+    ? `<div class="detail-row"><span class="label">Перевезення людей:</span> ${r.transport_hours || '—'} год${r.transport_route ? ' — ' + r.transport_route : ''}</div>`
+    : '';
   const fuelingLine = (r.fueling_liters && r.fueling_liters > 0)
-    ? `<div class="detail-row"><span class="label">Заправка:</span> ${r.fueling_liters} л</div>`
+    ? `<div class="detail-row"><span class="label">Заправка:</span> ${r.fueling_liters} л${r.fueling_source ? ' — ' + r.fueling_source : ''}</div>`
     : '';
   const noteLine = r.operator_note
     ? `<div class="detail-row"><span class="label">Примітка:</span> ${r.operator_note}</div>`
@@ -62,6 +65,7 @@ function reportDetailsHtml(r) {
     <div class="detail-row"><span class="label">Час роботи:</span> ${formatTimeUA(r.start_time)} – ${formatTimeUA(r.end_time)}, людиногодин: ${r.total_person_hours}</div>
     <div class="detail-row"><span class="label">Обід:</span> ${r.lunch_hours} год</div>
     ${travelLine}
+    ${transportLine}
     ${downtimeLine}
     ${fuelingLine}
     ${breakdownLine}
@@ -75,7 +79,8 @@ function reportDetailsHtml(r) {
 // ---------- Мої підтвердження: звіти, що очікують дії ----------
 
 const REPORT_SELECT_FIELDS = 'id,work_date,status,equipment_id,start_hours,end_hours,total_moto_hours,start_time,end_time,' +
-  'lunch_hours,total_person_hours,travel_hours,travel_route,downtime_hours,downtime_reason,fueling_liters,' +
+  'lunch_hours,total_person_hours,travel_hours,travel_route,transported_people,transport_route,transport_hours,' +
+  'downtime_hours,downtime_reason,fueling_liters,fueling_source,' +
   'has_breakdown,breakdown_description,repair_hours,start_hours_note,' +
   'operator_note,submitted_at,equipment(name),objects(name),users!daily_reports_operator_id_fkey(full_name)';
 
