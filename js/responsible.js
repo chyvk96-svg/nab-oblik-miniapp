@@ -24,10 +24,122 @@ function renderResponsibleHome(user) {
           <span class="sub">Уже опрацьовані звіти</span>
         </span>
       </button>
+      <button class="menu-btn" id="btn-add-object">
+        <span class="emoji">➕</span>
+        <span>
+          Додати об'єкт
+          <span class="sub">Новий об'єкт, якого ще немає в базі</span>
+        </span>
+      </button>
     </div>
   `;
   document.getElementById('btn-pending').addEventListener('click', () => renderPendingApprovals(user));
   document.getElementById('btn-history').addEventListener('click', () => renderApprovalHistory(user));
+  document.getElementById('btn-add-object').addEventListener('click', () => renderAddObject(user));
+}
+
+// ---------- Додати новий об'єкт ----------
+
+async function renderAddObject(user) {
+  app.innerHTML = `
+    ${topbarHtml("Додати об'єкт", responsibleSubtitle(user))}
+    <div class="wrap" style="padding-top:14px">
+      <div class="back-link" id="back-to-menu-add" style="padding:0 0 14px">← Назад до меню</div>
+      <div id="add-object-body" class="msg">Завантаження...</div>
+    </div>
+  `;
+  document.getElementById('back-to-menu-add').addEventListener('click', () => renderResponsibleHome(user));
+
+  const bodyEl = document.getElementById('add-object-body');
+
+  let respUsers;
+  try {
+    respUsers = await supaGet(
+      'users',
+      `role=eq.Відповідальний&status=eq.Активний&select=id,full_name&order=full_name.asc`
+    );
+  } catch (e) {
+    bodyEl.textContent = 'Помилка завантаження: ' + e.message;
+    return;
+  }
+
+  if (!respUsers || respUsers.length === 0) {
+    bodyEl.textContent = 'Немає активних користувачів з роллю "Відповідальний".';
+    return;
+  }
+
+  bodyEl.className = '';
+  bodyEl.innerHTML = `
+    <form id="add-object-form">
+      <div class="section">
+        <div class="section-title"><span class="n">1</span><span class="icon">🏗️</span>Новий об'єкт</div>
+        <label>Назва об'єкта</label>
+        <input type="text" id="object_name" required placeholder="Наприклад: вул. Шевченка, 12">
+
+        <label>Відповідальний за об'єкт</label>
+        <select id="object_responsible_id" required>
+          ${respUsers.map(u => `<option value="${u.id}">${u.full_name}</option>`).join('')}
+        </select>
+      </div>
+
+      <button type="submit" id="add-object-submit-btn">Створити об'єкт</button>
+      <div class="error-text hidden" id="add-object-error-box"></div>
+    </form>
+  `;
+
+  const form = document.getElementById('add-object-form');
+  const submitBtn = document.getElementById('add-object-submit-btn');
+  const errorBox = document.getElementById('add-object-error-box');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorBox.classList.add('hidden');
+
+    const name = document.getElementById('object_name').value.trim();
+    const responsibleId = document.getElementById('object_responsible_id').value;
+
+    if (!name) {
+      errorBox.textContent = "Вкажи назву об'єкта.";
+      errorBox.classList.remove('hidden');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Створення...';
+
+    try {
+      const objectId = await supaRpc('next_id', { p_prefix: 'OBJ' });
+      await supaInsert('objects', {
+        id: objectId,
+        name: name,
+        status: 'Активний'
+      });
+
+      const assignId = await supaRpc('next_id', { p_prefix: 'ASSIGN' });
+      await supaInsert('object_responsible', {
+        id: assignId,
+        object_id: objectId,
+        user_id: responsibleId,
+        status: 'Активний'
+      });
+
+      app.innerHTML = `
+        <div class="wrap">
+        <div class="success-box">
+          <div>✅ Об'єкт успішно створено</div>
+          <div class="stamp">${objectId}</div>
+        </div>
+        <button type="button" id="back-home-btn" style="background:var(--asphalt);color:var(--brand-yellow);width:100%;padding:14px;border:none;border-radius:4px;font-family:'Oswald',sans-serif;font-weight:600;font-size:14px;text-transform:uppercase;letter-spacing:0.03em;cursor:pointer">На головну</button>
+        </div>
+      `;
+      document.getElementById('back-home-btn').addEventListener('click', () => renderResponsibleHome(user));
+    } catch (err) {
+      errorBox.textContent = err.message;
+      errorBox.classList.remove('hidden');
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Створити об'єкт";
+    }
+  });
 }
 
 // ---------- Деталі одного звіту (спільна розмітка для обох списків) ----------
