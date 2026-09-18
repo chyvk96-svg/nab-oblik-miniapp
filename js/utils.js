@@ -23,6 +23,11 @@ function formatDateUA(isoDate) {
   return `${d}.${m}.${y}`;
 }
 
+function formatTimeUA(timeStr) {
+  if (!timeStr) return '—';
+  return timeStr.slice(0, 5); // "08:00:00" -> "08:00"
+}
+
 function formatDateTimeUA(isoTimestamp) {
   const d = new Date(isoTimestamp);
   const pad = n => String(n).padStart(2, '0');
