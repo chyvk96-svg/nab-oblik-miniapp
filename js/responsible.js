@@ -1,14 +1,25 @@
-// ---------- Екрани ролі "Відповідальний" ----------
+// ---------- Екрани ролей "Відповідальний" і "Адміністратор" ----------
+// Адміністратор може бути призначений відповідальним за окремі (зазвичай
+// приватні) об'єкти — тоді підтвердження, історія і додавання об'єктів
+// працюють для нього через ці самі функції, що й для Відповідального.
 
-function responsibleSubtitle(user) {
-  return `Відповідальний: ${user.full_name}`;
+function roleSubtitle(user) {
+  return `${user.role}: ${user.full_name}`;
+}
+
+function goToRoleHome(user) {
+  if (user.role === 'Адміністратор') {
+    renderAdminHome(user);
+  } else {
+    renderResponsibleHome(user);
+  }
 }
 
 // ---------- Головне меню відповідального ----------
 
 function renderResponsibleHome(user) {
   app.innerHTML = `
-    ${topbarHtml('Головне меню', responsibleSubtitle(user))}
+    ${topbarHtml('Головне меню', roleSubtitle(user))}
     <div class="menu-list">
       <button class="menu-btn" id="btn-pending">
         <span class="emoji">✅</span>
@@ -31,32 +42,44 @@ function renderResponsibleHome(user) {
           <span class="sub">Новий об'єкт, якого ще немає в базі</span>
         </span>
       </button>
+      <button class="menu-btn" id="btn-manage-objects">
+        <span class="emoji">🗂️</span>
+        <span>
+          Об'єкти
+          <span class="sub">Закрити/відкрити існуючі об'єкти</span>
+        </span>
+      </button>
     </div>
   `;
   document.getElementById('btn-pending').addEventListener('click', () => renderPendingApprovals(user));
   document.getElementById('btn-history').addEventListener('click', () => renderApprovalHistory(user));
   document.getElementById('btn-add-object').addEventListener('click', () => renderAddObject(user));
+  document.getElementById('btn-manage-objects').addEventListener('click', () => renderManageObjects(user));
 }
 
 // ---------- Додати новий об'єкт ----------
 
 async function renderAddObject(user) {
   app.innerHTML = `
-    ${topbarHtml("Додати об'єкт", responsibleSubtitle(user))}
+    ${topbarHtml("Додати об'єкт", roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-menu-add" style="padding:0 0 14px">← Назад до меню</div>
       <div id="add-object-body" class="msg">Завантаження...</div>
     </div>
   `;
-  document.getElementById('back-to-menu-add').addEventListener('click', () => renderResponsibleHome(user));
+  document.getElementById('back-to-menu-add').addEventListener('click', () => goToRoleHome(user));
 
   const bodyEl = document.getElementById('add-object-body');
 
-  let respUsers;
+  let respUsers, customersList;
   try {
     respUsers = await supaGet(
       'users',
-      `role=eq.Відповідальний&status=eq.Активний&select=id,full_name&order=full_name.asc`
+      `role=in.(Відповідальний,Адміністратор)&status=eq.Активний&select=id,full_name,role&order=full_name.asc`
+    );
+    customersList = await supaGet(
+      'customers',
+      `status=eq.Активний&select=id,name&order=name.asc`
     );
   } catch (e) {
     bodyEl.textContent = 'Помилка завантаження: ' + e.message;
@@ -64,7 +87,7 @@ async function renderAddObject(user) {
   }
 
   if (!respUsers || respUsers.length === 0) {
-    bodyEl.textContent = 'Немає активних користувачів з роллю "Відповідальний".';
+    bodyEl.textContent = 'Немає активних користувачів з роллю "Відповідальний" або "Адміністратор".';
     return;
   }
 
@@ -82,9 +105,16 @@ async function renderAddObject(user) {
         <label>Дата початку</label>
         <input type="date" id="object_start_date">
 
+        <label>Замовник</label>
+        <select id="object_customer_id" required>
+          ${customersList.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+          <option value="__new__">+ Новий замовник...</option>
+        </select>
+        <input type="text" id="object_new_customer_name" class="hidden" placeholder="Назва нового замовника" style="margin-top:8px">
+
         <label>Відповідальний за об'єкт</label>
         <select id="object_responsible_id" required>
-          ${respUsers.map(u => `<option value="${u.id}">${u.full_name}</option>`).join('')}
+          ${respUsers.map(u => `<option value="${u.id}">${u.full_name} (${u.role})</option>`).join('')}
         </select>
       </div>
 
@@ -96,6 +126,12 @@ async function renderAddObject(user) {
   const form = document.getElementById('add-object-form');
   const submitBtn = document.getElementById('add-object-submit-btn');
   const errorBox = document.getElementById('add-object-error-box');
+  const customerSelect = document.getElementById('object_customer_id');
+  const newCustomerInput = document.getElementById('object_new_customer_name');
+
+  customerSelect.addEventListener('change', () => {
+    newCustomerInput.classList.toggle('hidden', customerSelect.value !== '__new__');
+  });
 
   // За замовчуванням дата початку — сьогодні
   document.getElementById('object_start_date').value = new Date().toISOString().slice(0, 10);
@@ -108,9 +144,16 @@ async function renderAddObject(user) {
     const shortName = document.getElementById('object_short_name').value.trim();
     const startDate = document.getElementById('object_start_date').value;
     const responsibleId = document.getElementById('object_responsible_id').value;
+    const customerChoice = customerSelect.value;
+    const newCustomerName = newCustomerInput.value.trim();
 
     if (!name) {
       errorBox.textContent = "Вкажи назву об'єкта.";
+      errorBox.classList.remove('hidden');
+      return;
+    }
+    if (customerChoice === '__new__' && !newCustomerName) {
+      errorBox.textContent = "Вкажи назву нового замовника.";
       errorBox.classList.remove('hidden');
       return;
     }
@@ -119,12 +162,23 @@ async function renderAddObject(user) {
     submitBtn.textContent = 'Створення...';
 
     try {
+      let customerId = customerChoice;
+      if (customerChoice === '__new__') {
+        customerId = await supaRpc('next_id', { p_prefix: 'CST' });
+        await supaInsert('customers', {
+          id: customerId,
+          name: newCustomerName,
+          status: 'Активний'
+        });
+      }
+
       const objectId = await supaRpc('next_id', { p_prefix: 'OBJ' });
       await supaInsert('objects', {
         id: objectId,
         name: name,
         short_name: shortName || null,
         start_date: startDate || null,
+        customer_id: customerId,
         status: 'Активний'
       });
 
@@ -145,13 +199,75 @@ async function renderAddObject(user) {
         <button type="button" id="back-home-btn" style="background:var(--asphalt);color:var(--brand-yellow);width:100%;padding:14px;border:none;border-radius:4px;font-family:'Oswald',sans-serif;font-weight:600;font-size:14px;text-transform:uppercase;letter-spacing:0.03em;cursor:pointer">На головну</button>
         </div>
       `;
-      document.getElementById('back-home-btn').addEventListener('click', () => renderResponsibleHome(user));
+      document.getElementById('back-home-btn').addEventListener('click', () => goToRoleHome(user));
     } catch (err) {
       errorBox.textContent = err.message;
       errorBox.classList.remove('hidden');
       submitBtn.disabled = false;
       submitBtn.textContent = "Створити об'єкт";
     }
+  });
+}
+
+// ---------- Об'єкти: закриття / відкриття ----------
+
+async function renderManageObjects(user) {
+  app.innerHTML = `
+    ${topbarHtml("Об'єкти", roleSubtitle(user))}
+    <div class="wrap" style="padding-top:14px">
+      <div class="back-link" id="back-to-menu-objects" style="padding:0 0 14px">← Назад до меню</div>
+      <div id="objects-list" class="msg">Завантаження...</div>
+    </div>
+  `;
+  document.getElementById('back-to-menu-objects').addEventListener('click', () => goToRoleHome(user));
+
+  const listEl = document.getElementById('objects-list');
+
+  let objectsList;
+  try {
+    objectsList = await supaGet(
+      'objects',
+      `select=id,name,short_name,status,customers(name)&order=status.asc,name.asc`
+    );
+  } catch (e) {
+    listEl.textContent = 'Помилка завантаження: ' + e.message;
+    return;
+  }
+
+  if (!objectsList || objectsList.length === 0) {
+    listEl.textContent = "Об'єктів ще немає.";
+    return;
+  }
+
+  listEl.className = '';
+  listEl.innerHTML = objectsList.map(o => `
+    <div class="report-card" id="obj-${o.id}">
+      <div class="top-row">
+        <span class="date">${o.name}</span>
+        <span class="status-chip ${o.status === 'Активний' ? 'status-final' : 'status-corr'}">${o.status}</span>
+      </div>
+      <div class="meta">Замовник: ${o.customers?.name || '—'}</div>
+      <button class="btn-confirm" style="margin-top:10px" data-object-id="${o.id}" data-current-status="${o.status}">
+        ${o.status === 'Активний' ? "Закрити об'єкт" : "Відкрити об'єкт"}
+      </button>
+    </div>
+  `).join('');
+
+  listEl.querySelectorAll('[data-object-id]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const newStatus = btn.dataset.currentStatus === 'Активний' ? 'Закритий' : 'Активний';
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = 'Оновлення...';
+      try {
+        await supaUpdate('objects', `id=eq.${btn.dataset.objectId}`, { status: newStatus });
+        renderManageObjects(user);
+      } catch (e) {
+        alert('Помилка: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
+    });
   });
 }
 
@@ -182,10 +298,14 @@ function reportDetailsHtml(r) {
   const noteLine = r.operator_note
     ? `<div class="detail-row"><span class="label">Примітка:</span> ${r.operator_note}</div>`
     : '';
+  const customerLine = r.customer_name
+    ? `<div class="detail-row"><span class="label">Замовник:</span> ${r.customer_name}</div>`
+    : '';
 
   return `
     <div class="operator-name">${r.users?.full_name || '—'}</div>
     <div class="meta">${r.equipment?.name || '—'} · ${r.objects?.name || '—'}</div>
+    ${customerLine}
     <div class="hours">${r.start_hours} → ${r.end_hours} год (разом ${r.total_moto_hours})</div>
     <div class="detail-row"><span class="label">Час роботи:</span> ${formatTimeUA(r.start_time)} – ${formatTimeUA(r.end_time)}, людиногодин: ${r.total_person_hours}</div>
     <div class="detail-row"><span class="label">Обід:</span> ${r.lunch_hours} год</div>
@@ -203,7 +323,7 @@ function reportDetailsHtml(r) {
 
 // ---------- Мої підтвердження: звіти, що очікують дії ----------
 
-const REPORT_SELECT_FIELDS = 'id,work_date,status,equipment_id,start_hours,end_hours,total_moto_hours,start_time,end_time,' +
+const REPORT_SELECT_FIELDS = 'id,work_date,status,equipment_id,customer_name,start_hours,end_hours,total_moto_hours,start_time,end_time,' +
   'lunch_hours,total_person_hours,travel_hours,travel_route,transported_people,transport_route,transport_hours,' +
   'downtime_hours,downtime_reason,fueling_liters,fueling_source,' +
   'has_breakdown,breakdown_description,repair_hours,start_hours_note,' +
@@ -211,13 +331,13 @@ const REPORT_SELECT_FIELDS = 'id,work_date,status,equipment_id,start_hours,end_h
 
 async function renderPendingApprovals(user) {
   app.innerHTML = `
-    ${topbarHtml('Мої підтвердження', responsibleSubtitle(user))}
+    ${topbarHtml('Мої підтвердження', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-menu" style="padding:0 0 14px">← Назад до меню</div>
       <div id="pending-list" class="msg">Завантаження...</div>
     </div>
   `;
-  document.getElementById('back-to-menu').addEventListener('click', () => renderResponsibleHome(user));
+  document.getElementById('back-to-menu').addEventListener('click', () => goToRoleHome(user));
 
   let reports;
   try {
@@ -288,15 +408,16 @@ async function confirmReport(user, reportId, equipmentId, endHours, btn) {
       id: approvalId,
       report_id: reportId,
       user_id: user.id,
-      role: 'Відповідальний',
+      role: user.role,
       result: 'Підтверджено',
       telegram_id: tg.initDataUnsafe?.user?.id || null,
       confirmation_code: confirmationCode,
       status: 'Записано'
     });
 
-    // Підтвердження відповідальним тепер є фінальним кроком:
-    // одразу закриваємо звіт і оновлюємо офіційні мотогодини техніки.
+    // Підтвердження відповідальним (або адміністратором для приватних об'єктів)
+    // тепер є фінальним кроком: одразу закриваємо звіт і оновлюємо
+    // офіційні мотогодини техніки.
     await supaUpdate('daily_reports', `id=eq.${reportId}`, {
       status: 'Фінально підтверджено',
       final_closed_at: new Date().toISOString()
@@ -330,7 +451,7 @@ async function rejectReport(user, reportId, btn) {
       id: approvalId,
       report_id: reportId,
       user_id: user.id,
-      role: 'Відповідальний',
+      role: user.role,
       result: 'Відхилено',
       telegram_id: tg.initDataUnsafe?.user?.id || null,
       comment: comment,
@@ -353,13 +474,13 @@ async function rejectReport(user, reportId, btn) {
 
 async function renderApprovalHistory(user) {
   app.innerHTML = `
-    ${topbarHtml('Історія', responsibleSubtitle(user))}
+    ${topbarHtml('Історія', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-menu-hist" style="padding:0 0 14px">← Назад до меню</div>
       <div id="history-list" class="msg">Завантаження...</div>
     </div>
   `;
-  document.getElementById('back-to-menu-hist').addEventListener('click', () => renderResponsibleHome(user));
+  document.getElementById('back-to-menu-hist').addEventListener('click', () => goToRoleHome(user));
 
   let reports;
   try {
