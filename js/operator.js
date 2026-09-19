@@ -199,7 +199,7 @@ async function renderOperatorForm(user, existingReport = null) {
       </div>
 
       <div class="section">
-        <div class="section-title"><span class="n">4</span><span class="icon">🚗</span>Переїзд</div>
+        <div class="section-title"><span class="n">4</span><span class="icon">🚗</span>Перебазування техніки</div>
         <label>Години</label>
         <input type="number" step="0.1" id="travel_hours" value="${isEdit ? (existingReport.travel_hours || 0) : '0'}">
         <label>Опис маршруту</label>
