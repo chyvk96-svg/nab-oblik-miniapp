@@ -1,4 +1,4 @@
-  :root {
+    :root {
     --asphalt: #141311;
     --concrete: #F3F1EA;
     --steel: #D8D4C8;
@@ -365,3 +365,28 @@
     text-transform: uppercase;
     cursor: pointer;
   }
+
+  .btn-add-top {
+    display: block;
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 4px;
+    background: var(--brand-yellow);
+    color: var(--asphalt);
+    font-family: 'Oswald', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    cursor: pointer;
+  }
+  .btn-add-top:disabled { opacity: 0.5; }
+
+  .item-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .item-actions button { flex: 1; }
