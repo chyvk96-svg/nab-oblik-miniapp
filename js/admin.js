@@ -90,7 +90,7 @@ async function renderAddUser(user) {
   app.innerHTML = `
     ${topbarHtml('Додати користувача', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-menu-adduser" style="padding:0 0 14px">← Назад до меню</div>
+      <div class="back-link" id="back-to-menu-adduser" style="margin:0 0 14px">← Назад до меню</div>
       <div id="add-user-body" class="msg">Завантаження...</div>
     </div>
   `;
@@ -238,7 +238,7 @@ async function renderAdminClosedReports(user) {
   app.innerHTML = `
     ${topbarHtml('Усі закриті звіти', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-menu-closed" style="padding:0 0 14px">← Назад до меню</div>
+      <div class="back-link" id="back-to-menu-closed" style="margin:0 0 14px">← Назад до меню</div>
       <div id="admin-list" class="msg">Завантаження...</div>
     </div>
   `;
