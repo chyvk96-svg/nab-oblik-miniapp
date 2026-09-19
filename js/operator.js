@@ -34,7 +34,7 @@ async function renderMyReports(user) {
   app.innerHTML = `
     ${topbarHtml('Мої записи', `Оператор: ${user.full_name}`)}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-menu" style="padding:0 0 14px">← Назад до меню</div>
+      <div class="back-link" id="back-to-menu" style="margin:0 0 14px">← Назад до меню</div>
       <div id="reports-list" class="msg">Завантаження...</div>
     </div>
   `;
@@ -136,7 +136,7 @@ async function renderOperatorForm(user, existingReport = null) {
   app.innerHTML = `
     ${topbarHtml(isEdit ? 'Редагування звіту' : 'Внести дані', `Оператор: ${user.full_name}`)}
     <div class="wrap">
-    <div class="back-link" id="back-to-menu-form" style="padding:14px 0 0">← Назад до меню</div>
+    <div class="back-link" id="back-to-menu-form" style="margin:14px 0 0">← Назад до меню</div>
     <form id="report-form">
 
       <div class="section">
