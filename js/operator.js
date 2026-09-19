@@ -191,13 +191,14 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         <div class="row2">
           <div>
             <label>Початок</label>
-            <input type="time" id="start_time" value="${prefill ? formatTimeUA(prefill.start_time) : ''}" required>
+            <input type="text" inputmode="numeric" id="start_time" placeholder="ГГ:ХВ" maxlength="5" value="${prefill ? formatTimeUA(prefill.start_time) : ''}" required>
           </div>
           <div>
             <label>Кінець</label>
-            <input type="time" id="end_time" value="${prefill ? formatTimeUA(prefill.end_time) : ''}" required>
+            <input type="text" inputmode="numeric" id="end_time" placeholder="ГГ:ХВ" maxlength="5" value="${prefill ? formatTimeUA(prefill.end_time) : ''}" required>
           </div>
         </div>
+        <div class="hint-inline">Вводь час вручну у форматі ГГ:ХВ, наприклад 07:45</div>
         <label>Обід, год</label>
         <input type="number" step="0.1" id="lunch_hours" value="${prefill ? prefill.lunch_hours : '0'}">
       </div>
@@ -324,6 +325,21 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   document.getElementById('end_hours').addEventListener('input', checkEndHours);
   checkEndHours();
 
+  // Автоформатування ручного вводу часу (ГГ:ХВ) — користувач вводить лише цифри,
+  // двокрапка підставляється автоматично.
+  function attachTimeAutoFormat(inputEl) {
+    inputEl.addEventListener('input', () => {
+      let digits = inputEl.value.replace(/\D/g, '').slice(0, 4);
+      if (digits.length >= 3) {
+        inputEl.value = digits.slice(0, 2) + ':' + digits.slice(2);
+      } else {
+        inputEl.value = digits;
+      }
+    });
+  }
+  attachTimeAutoFormat(document.getElementById('start_time'));
+  attachTimeAutoFormat(document.getElementById('end_time'));
+
   // Автовизначення замовника і списку відповідальних при виборі об'єкта
   function applySuggestedCustomer() {
     const objectId = document.getElementById('object_id').value;
@@ -408,11 +424,15 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         throw new Error('Вкажи маршрут і години перевезення людей.');
       }
 
+      const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
+      const startTime = document.getElementById('start_time').value.trim();
+      const endTime = document.getElementById('end_time').value.trim();
+      if (!timePattern.test(startTime) || !timePattern.test(endTime)) {
+        throw new Error('Вкажи час початку і кінця роботи у форматі ГГ:ХВ (наприклад, 07:45).');
+      }
+
       submitBtn.disabled = true;
       submitBtn.textContent = 'Перевірка...';
-
-      const startTime = document.getElementById('start_time').value;
-      const endTime = document.getElementById('end_time').value;
       const lunchHours = parseFloat(document.getElementById('lunch_hours').value) || 0;
       const repairHours = hasBreakdown ? (parseFloat(document.getElementById('repair_hours')?.value) || 0) : 0;
       // Ремонт понад 30 хв повністю віднімається від загальних (людино)годин
