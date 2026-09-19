@@ -1,19 +1,75 @@
 // ---------- Екран ролі "Адміністратор" ----------
-// Наразі лише перегляд фінально підтверджених звітів, без дій.
-// Використовує спільні reportDetailsHtml(), REPORT_SELECT_FIELDS, statusChipClass()
-// з responsible.js (той самий файл вже завантажений у сторінку).
+// Використовує спільні reportDetailsHtml(), REPORT_SELECT_FIELDS, roleSubtitle(),
+// goToRoleHome(), renderPendingApprovals(), renderApprovalHistory(), renderAddObject(),
+// renderManageObjects() з responsible.js (той самий файл вже завантажений у сторінку).
+// Адміністратор може бути призначений відповідальним за окремі (зазвичай приватні)
+// об'єкти — тоді "Мої підтвердження"/"Історія" показують саме ці звіти.
 
 function adminSubtitle(user) {
-  return `Адміністратор: ${user.full_name}`;
+  return roleSubtitle(user);
 }
 
-async function renderAdminHome(user) {
+// ---------- Головне меню адміністратора ----------
+
+function renderAdminHome(user) {
   app.innerHTML = `
-    ${topbarHtml('Закриті звіти', adminSubtitle(user))}
+    ${topbarHtml('Головне меню', roleSubtitle(user))}
+    <div class="menu-list">
+      <button class="menu-btn" id="btn-pending">
+        <span class="emoji">✅</span>
+        <span>
+          Мої підтвердження
+          <span class="sub">Звіти по об'єктах, де я відповідальний</span>
+        </span>
+      </button>
+      <button class="menu-btn" id="btn-history">
+        <span class="emoji">📋</span>
+        <span>
+          Історія
+          <span class="sub">Уже опрацьовані мною звіти</span>
+        </span>
+      </button>
+      <button class="menu-btn" id="btn-add-object">
+        <span class="emoji">➕</span>
+        <span>
+          Додати об'єкт
+          <span class="sub">Новий об'єкт, якого ще немає в базі</span>
+        </span>
+      </button>
+      <button class="menu-btn" id="btn-manage-objects">
+        <span class="emoji">🗂️</span>
+        <span>
+          Об'єкти
+          <span class="sub">Закрити/відкрити існуючі об'єкти</span>
+        </span>
+      </button>
+      <button class="menu-btn" id="btn-closed-reports">
+        <span class="emoji">📊</span>
+        <span>
+          Усі закриті звіти
+          <span class="sub">Повний огляд по всій компанії</span>
+        </span>
+      </button>
+    </div>
+  `;
+  document.getElementById('btn-pending').addEventListener('click', () => renderPendingApprovals(user));
+  document.getElementById('btn-history').addEventListener('click', () => renderApprovalHistory(user));
+  document.getElementById('btn-add-object').addEventListener('click', () => renderAddObject(user));
+  document.getElementById('btn-manage-objects').addEventListener('click', () => renderManageObjects(user));
+  document.getElementById('btn-closed-reports').addEventListener('click', () => renderAdminClosedReports(user));
+}
+
+// ---------- Усі закриті звіти по всій компанії (тільки перегляд) ----------
+
+async function renderAdminClosedReports(user) {
+  app.innerHTML = `
+    ${topbarHtml('Усі закриті звіти', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
+      <div class="back-link" id="back-to-menu-closed" style="padding:0 0 14px">← Назад до меню</div>
       <div id="admin-list" class="msg">Завантаження...</div>
     </div>
   `;
+  document.getElementById('back-to-menu-closed').addEventListener('click', () => renderAdminHome(user));
 
   let reports;
   try {
