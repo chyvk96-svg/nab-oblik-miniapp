@@ -247,11 +247,18 @@ async function renderManageObjects(user) {
         <span class="status-chip ${o.status === 'Активний' ? 'status-final' : 'status-corr'}">${o.status}</span>
       </div>
       <div class="meta">Замовник: ${o.customers?.name || '—'}</div>
-      <button class="btn-confirm" style="margin-top:10px" data-object-id="${o.id}" data-current-status="${o.status}">
-        ${o.status === 'Активний' ? "Закрити об'єкт" : "Відкрити об'єкт"}
-      </button>
+      <div class="item-actions">
+        <button class="btn-confirm" data-edit-object="${o.id}">Редагувати</button>
+        <button class="btn-reject" data-object-id="${o.id}" data-current-status="${o.status}">
+          ${o.status === 'Активний' ? "Закрити" : "Відкрити"}
+        </button>
+      </div>
     </div>
   `).join('');
+
+  listEl.querySelectorAll('[data-edit-object]').forEach(btn => {
+    btn.addEventListener('click', () => renderEditObject(user, btn.dataset.editObject));
+  });
 
   listEl.querySelectorAll('[data-object-id]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -269,6 +276,177 @@ async function renderManageObjects(user) {
       }
     });
   });
+}
+
+// ---------- Редагування об'єкта: назва/замовник + список відповідальних ----------
+
+async function renderEditObject(user, objectId) {
+  app.innerHTML = `
+    ${topbarHtml("Редагування об'єкта", roleSubtitle(user))}
+    <div class="wrap" style="padding-top:14px">
+      <div class="back-link" id="back-to-objects-list" style="padding:0 0 14px">← Назад до списку</div>
+      <div id="edit-object-body" class="msg">Завантаження...</div>
+    </div>
+  `;
+  document.getElementById('back-to-objects-list').addEventListener('click', () => renderManageObjects(user));
+
+  const bodyEl = document.getElementById('edit-object-body');
+
+  let objectRow, customersList, respCandidates, currentResponsible;
+  try {
+    const rows = await supaGet('objects', `id=eq.${objectId}&select=id,name,short_name,customer_id`);
+    objectRow = rows && rows[0];
+    customersList = await supaGet('customers', `status=eq.Активний&select=id,name&order=name.asc`);
+    respCandidates = await supaGet(
+      'users',
+      `role=in.(Відповідальний,Адміністратор)&status=eq.Активний&select=id,full_name,role&order=full_name.asc`
+    );
+    currentResponsible = await supaGet(
+      'object_responsible',
+      `object_id=eq.${objectId}&select=id,user_id,status,users(full_name,role)&order=status.asc`
+    );
+  } catch (e) {
+    bodyEl.textContent = 'Помилка завантаження: ' + e.message;
+    return;
+  }
+
+  if (!objectRow) {
+    bodyEl.textContent = "Об'єкт не знайдено.";
+    return;
+  }
+
+  const assignedActiveUserIds = new Set(
+    (currentResponsible || []).filter(r => r.status === 'Активний').map(r => r.user_id)
+  );
+  const availableToAdd = respCandidates.filter(u => !assignedActiveUserIds.has(u.id));
+
+  bodyEl.className = '';
+  bodyEl.innerHTML = `
+    <form id="edit-object-form">
+      <div class="section">
+        <div class="section-title"><span class="n">1</span><span class="icon">🏗️</span>Дані об'єкта</div>
+
+        <label>Назва об'єкта</label>
+        <input type="text" id="edit_object_name" required value="${objectRow.name}">
+
+        <label>Скорочена назва</label>
+        <input type="text" id="edit_object_short_name" value="${objectRow.short_name || ''}">
+
+        <label>Замовник</label>
+        <select id="edit_object_customer_id" required>
+          ${customersList.map(c => `<option value="${c.id}" ${c.id === objectRow.customer_id ? 'selected' : ''}>${c.name}</option>`).join('')}
+        </select>
+      </div>
+
+      <button type="submit" id="edit-object-submit-btn">Зберегти зміни</button>
+      <div class="error-text hidden" id="edit-object-error-box"></div>
+    </form>
+
+    <div class="section">
+      <div class="section-title"><span class="n">2</span><span class="icon">👥</span>Відповідальні за об'єкт</div>
+      <div id="responsible-list">
+        ${(currentResponsible || []).length === 0 ? '<div class="hint-inline">Ще нікого не призначено.</div>' : ''}
+        ${(currentResponsible || []).map(r => `
+          <div class="checkbox-row" style="justify-content:space-between">
+            <label style="margin:0">${r.users?.full_name || '—'} (${r.users?.role || '—'})</label>
+            <button type="button" class="btn-reject" style="flex:none;padding:8px 12px" data-toggle-resp="${r.id}" data-current-status="${r.status}">
+              ${r.status === 'Активний' ? 'Зняти' : 'Повернути'}
+            </button>
+          </div>
+        `).join('')}
+      </div>
+
+      ${availableToAdd.length > 0 ? `
+        <label style="margin-top:18px">Додати відповідального</label>
+        <select id="add-responsible-select">
+          ${availableToAdd.map(u => `<option value="${u.id}">${u.full_name} (${u.role})</option>`).join('')}
+        </select>
+        <button type="button" class="btn-add-top" id="btn-add-responsible" style="margin-top:10px">+ Додати</button>
+      ` : ''}
+    </div>
+  `;
+
+  const form = document.getElementById('edit-object-form');
+  const submitBtn = document.getElementById('edit-object-submit-btn');
+  const errorBox = document.getElementById('edit-object-error-box');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorBox.classList.add('hidden');
+
+    const name = document.getElementById('edit_object_name').value.trim();
+    const shortName = document.getElementById('edit_object_short_name').value.trim();
+    const customerId = document.getElementById('edit_object_customer_id').value;
+
+    if (!name) {
+      errorBox.textContent = "Вкажи назву об'єкта.";
+      errorBox.classList.remove('hidden');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Збереження...';
+
+    try {
+      await supaUpdate('objects', `id=eq.${objectId}`, {
+        name: name,
+        short_name: shortName || null,
+        customer_id: customerId
+      });
+      renderEditObject(user, objectId);
+    } catch (err) {
+      errorBox.textContent = err.message;
+      errorBox.classList.remove('hidden');
+      submitBtn.disabled = false;
+      submitBtn.textContent = "Зберегти зміни";
+    }
+  });
+
+  document.querySelectorAll('[data-toggle-resp]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const newStatus = btn.dataset.currentStatus === 'Активний' ? 'Неактивний' : 'Активний';
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        await supaUpdate('object_responsible', `id=eq.${btn.dataset.toggleResp}`, { status: newStatus });
+        renderEditObject(user, objectId);
+      } catch (e) {
+        alert('Помилка: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
+    });
+  });
+
+  const addRespBtn = document.getElementById('btn-add-responsible');
+  if (addRespBtn) {
+    addRespBtn.addEventListener('click', async () => {
+      const selectedUserId = document.getElementById('add-responsible-select').value;
+      addRespBtn.disabled = true;
+      addRespBtn.textContent = 'Додавання...';
+      try {
+        // Якщо раніше був записаний і знятий — повертаємо його, а не дублюємо
+        const existingInactive = (currentResponsible || []).find(r => r.user_id === selectedUserId && r.status !== 'Активний');
+        if (existingInactive) {
+          await supaUpdate('object_responsible', `id=eq.${existingInactive.id}`, { status: 'Активний' });
+        } else {
+          const assignId = await supaRpc('next_id', { p_prefix: 'ASSIGN' });
+          await supaInsert('object_responsible', {
+            id: assignId,
+            object_id: objectId,
+            user_id: selectedUserId,
+            status: 'Активний'
+          });
+        }
+        renderEditObject(user, objectId);
+      } catch (e) {
+        alert('Помилка: ' + e.message);
+        addRespBtn.disabled = false;
+        addRespBtn.textContent = '+ Додати';
+      }
+    });
+  }
 }
 
 // ---------- Деталі одного звіту (спільна розмітка для обох списків) ----------
