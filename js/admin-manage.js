@@ -13,7 +13,7 @@ async function renderUserList(user) {
   app.innerHTML = `
     ${topbarHtml('Користувачі', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-menu-users" style="padding:0 0 14px">← Назад до меню</div>
+      <div class="back-link" id="back-to-menu-users" style="margin:0 0 14px">← Назад до меню</div>
       <button type="button" class="btn-add-top" id="btn-go-add-user">+ Додати користувача</button>
       <div id="users-list" class="msg">Завантаження...</div>
     </div>
@@ -79,7 +79,7 @@ async function renderEditUser(user, targetUserId) {
   app.innerHTML = `
     ${topbarHtml('Редагування користувача', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-users-list" style="padding:0 0 14px">← Назад до списку</div>
+      <div class="back-link" id="back-to-users-list" style="margin:0 0 14px">← Назад до списку</div>
       <div id="edit-user-body" class="msg">Завантаження...</div>
     </div>
   `;
@@ -192,7 +192,7 @@ async function renderEquipmentList(user) {
   app.innerHTML = `
     ${topbarHtml('Техніка', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-menu-eq" style="padding:0 0 14px">← Назад до меню</div>
+      <div class="back-link" id="back-to-menu-eq" style="margin:0 0 14px">← Назад до меню</div>
       <button type="button" class="btn-add-top" id="btn-go-add-equipment">+ Додати техніку</button>
       <div id="equipment-list" class="msg">Завантаження...</div>
     </div>
@@ -258,7 +258,7 @@ async function renderAddEquipment(user) {
   app.innerHTML = `
     ${topbarHtml('Додати техніку', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-eq-list" style="padding:0 0 14px">← Назад до списку</div>
+      <div class="back-link" id="back-to-eq-list" style="margin:0 0 14px">← Назад до списку</div>
       <form id="add-equipment-form">
         <div class="section">
           <div class="section-title"><span class="n">1</span><span class="icon">🚜</span>Нова техніка</div>
@@ -339,7 +339,7 @@ async function renderEditEquipment(user, equipmentId) {
   app.innerHTML = `
     ${topbarHtml('Редагування техніки', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-eq-list2" style="padding:0 0 14px">← Назад до списку</div>
+      <div class="back-link" id="back-to-eq-list2" style="margin:0 0 14px">← Назад до списку</div>
       <div id="edit-eq-body" class="msg">Завантаження...</div>
     </div>
   `;
@@ -432,7 +432,7 @@ async function renderUserEquipment(user, targetUserId) {
   app.innerHTML = `
     ${topbarHtml("Техніка оператора", roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-edit-user" style="padding:0 0 14px">← Назад</div>
+      <div class="back-link" id="back-to-edit-user" style="margin:0 0 14px">← Назад</div>
       <div id="user-equipment-body" class="msg">Завантаження...</div>
     </div>
   `;
@@ -532,7 +532,7 @@ async function renderCustomersList(user) {
   app.innerHTML = `
     ${topbarHtml('Замовники', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-menu-cst" style="padding:0 0 14px">← Назад до меню</div>
+      <div class="back-link" id="back-to-menu-cst" style="margin:0 0 14px">← Назад до меню</div>
       <button type="button" class="btn-add-top" id="btn-go-add-customer">+ Додати замовника</button>
       <div id="customers-list" class="msg">Завантаження...</div>
     </div>
@@ -598,7 +598,7 @@ async function renderAddCustomer(user) {
   app.innerHTML = `
     ${topbarHtml('Додати замовника', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-cst-list" style="padding:0 0 14px">← Назад до списку</div>
+      <div class="back-link" id="back-to-cst-list" style="margin:0 0 14px">← Назад до списку</div>
       <form id="add-customer-form">
         <div class="section">
           <div class="section-title"><span class="n">1</span><span class="icon">🏢</span>Новий замовник</div>
@@ -669,7 +669,7 @@ async function renderEditCustomer(user, customerId) {
   app.innerHTML = `
     ${topbarHtml('Редагування замовника', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-cst-list2" style="padding:0 0 14px">← Назад до списку</div>
+      <div class="back-link" id="back-to-cst-list2" style="margin:0 0 14px">← Назад до списку</div>
       <div id="edit-cst-body" class="msg">Завантаження...</div>
     </div>
   `;
