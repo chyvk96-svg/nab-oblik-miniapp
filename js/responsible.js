@@ -63,7 +63,7 @@ async function renderAddObject(user) {
   app.innerHTML = `
     ${topbarHtml("Додати об'єкт", roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-menu-add" style="padding:0 0 14px">← Назад до меню</div>
+      <div class="back-link" id="back-to-menu-add" style="margin:0 0 14px">← Назад до меню</div>
       <div id="add-object-body" class="msg">Завантаження...</div>
     </div>
   `;
@@ -215,7 +215,7 @@ async function renderManageObjects(user) {
   app.innerHTML = `
     ${topbarHtml("Об'єкти", roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-menu-objects" style="padding:0 0 14px">← Назад до меню</div>
+      <div class="back-link" id="back-to-menu-objects" style="margin:0 0 14px">← Назад до меню</div>
       <div id="objects-list" class="msg">Завантаження...</div>
     </div>
   `;
@@ -267,7 +267,13 @@ async function renderManageObjects(user) {
       btn.disabled = true;
       btn.textContent = 'Оновлення...';
       try {
-        await supaUpdate('objects', `id=eq.${btn.dataset.objectId}`, { status: newStatus });
+        const updateData = { status: newStatus };
+        if (newStatus === 'Закритий') {
+          updateData.end_date = new Date().toISOString().slice(0, 10);
+        } else {
+          updateData.end_date = null;
+        }
+        await supaUpdate('objects', `id=eq.${btn.dataset.objectId}`, updateData);
         renderManageObjects(user);
       } catch (e) {
         alert('Помилка: ' + e.message);
@@ -284,7 +290,7 @@ async function renderEditObject(user, objectId) {
   app.innerHTML = `
     ${topbarHtml("Редагування об'єкта", roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-objects-list" style="padding:0 0 14px">← Назад до списку</div>
+      <div class="back-link" id="back-to-objects-list" style="margin:0 0 14px">← Назад до списку</div>
       <div id="edit-object-body" class="msg">Завантаження...</div>
     </div>
   `;
@@ -294,7 +300,7 @@ async function renderEditObject(user, objectId) {
 
   let objectRow, customersList, respCandidates, currentResponsible;
   try {
-    const rows = await supaGet('objects', `id=eq.${objectId}&select=id,name,short_name,customer_id`);
+    const rows = await supaGet('objects', `id=eq.${objectId}&select=id,name,short_name,customer_id,start_date,end_date`);
     objectRow = rows && rows[0];
     customersList = await supaGet('customers', `status=eq.Активний&select=id,name&order=name.asc`);
     respCandidates = await supaGet(
@@ -336,6 +342,13 @@ async function renderEditObject(user, objectId) {
         <select id="edit_object_customer_id" required>
           ${customersList.map(c => `<option value="${c.id}" ${c.id === objectRow.customer_id ? 'selected' : ''}>${c.name}</option>`).join('')}
         </select>
+
+        <label>Дата початку</label>
+        <input type="date" id="edit_object_start_date" value="${objectRow.start_date || ''}">
+
+        <label>Дата завершення</label>
+        <input type="date" id="edit_object_end_date" value="${objectRow.end_date || ''}">
+        <div class="hint-inline">Проставляється автоматично при закритті об'єкта, але можна виправити вручну.</div>
       </div>
 
       <button type="submit" id="edit-object-submit-btn">Зберегти зміни</button>
@@ -377,6 +390,8 @@ async function renderEditObject(user, objectId) {
     const name = document.getElementById('edit_object_name').value.trim();
     const shortName = document.getElementById('edit_object_short_name').value.trim();
     const customerId = document.getElementById('edit_object_customer_id').value;
+    const startDate = document.getElementById('edit_object_start_date').value;
+    const endDate = document.getElementById('edit_object_end_date').value;
 
     if (!name) {
       errorBox.textContent = "Вкажи назву об'єкта.";
@@ -391,7 +406,9 @@ async function renderEditObject(user, objectId) {
       await supaUpdate('objects', `id=eq.${objectId}`, {
         name: name,
         short_name: shortName || null,
-        customer_id: customerId
+        customer_id: customerId,
+        start_date: startDate || null,
+        end_date: endDate || null
       });
       renderEditObject(user, objectId);
     } catch (err) {
@@ -511,7 +528,7 @@ async function renderPendingApprovals(user) {
   app.innerHTML = `
     ${topbarHtml('Мої підтвердження', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-menu" style="padding:0 0 14px">← Назад до меню</div>
+      <div class="back-link" id="back-to-menu" style="margin:0 0 14px">← Назад до меню</div>
       <div id="pending-list" class="msg">Завантаження...</div>
     </div>
   `;
@@ -654,7 +671,7 @@ async function renderApprovalHistory(user) {
   app.innerHTML = `
     ${topbarHtml('Історія', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-menu-hist" style="padding:0 0 14px">← Назад до меню</div>
+      <div class="back-link" id="back-to-menu-hist" style="margin:0 0 14px">← Назад до меню</div>
       <div id="history-list" class="msg">Завантаження...</div>
     </div>
   `;
