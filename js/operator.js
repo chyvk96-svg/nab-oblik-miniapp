@@ -110,7 +110,7 @@ async function renderOperatorForm(user, existingReport = null) {
       'user_equipment',
       `user_id=eq.${user.id}&status=eq.Активна&select=equipment_id,equipment(id,name,confirmed_hours)`
     );
-    objects = await supaGet('objects', `status=eq.Активний&select=id,name`);
+    objects = await supaGet('objects', `status=eq.Активний&select=id,name,customer_id,customers(name)`);
   } catch (e) {
     renderMessage('Помилка завантаження довідників: ' + e.message);
     return;
@@ -151,8 +151,11 @@ async function renderOperatorForm(user, existingReport = null) {
         <label>Об'єкт</label>
         <select id="object_id" required>${objectOptions}</select>
 
+        <label>Замовник</label>
+        <input type="text" id="customer_name" placeholder="Визначається автоматично, можна поправити">
+
         <label>Відповідальний за об'єкт</label>
-        <input type="text" id="responsible_display" disabled placeholder="Визначається автоматично">
+        <select id="responsible_id" required></select>
       </div>
 
       <div class="section">
@@ -316,30 +319,50 @@ async function renderOperatorForm(user, existingReport = null) {
   document.getElementById('end_hours').addEventListener('input', checkEndHours);
   checkEndHours();
 
-  // Автовизначення відповідального при виборі об'єкта
-  async function updateResponsible() {
+  // Автовизначення замовника і списку відповідальних при виборі об'єкта
+  function applySuggestedCustomer() {
     const objectId = document.getElementById('object_id').value;
-    const respDisplay = document.getElementById('responsible_display');
-    respDisplay.value = 'Завантаження...';
+    const selectedObject = objects.find(o => o.id === objectId);
+    document.getElementById('customer_name').value = selectedObject?.customers?.name || '';
+  }
+
+  async function updateResponsibleOptions() {
+    const objectId = document.getElementById('object_id').value;
+    const respSelect = document.getElementById('responsible_id');
+    respSelect.innerHTML = '<option value="">Завантаження...</option>';
     try {
       const links = await supaGet(
         'object_responsible',
-        `object_id=eq.${objectId}&status=eq.Активний&select=user_id,users(full_name)`
+        `object_id=eq.${objectId}&status=eq.Активний&select=user_id,users(full_name,role)`
       );
       if (links && links.length > 0) {
-        respDisplay.value = links[0].users.full_name;
-        respDisplay.dataset.userId = links[0].user_id;
+        respSelect.innerHTML = links
+          .map(l => `<option value="${l.user_id}">${l.users.full_name} (${l.users.role})</option>`)
+          .join('');
+        if (isEdit && existingReport.responsible_id && links.some(l => l.user_id === existingReport.responsible_id)) {
+          respSelect.value = existingReport.responsible_id;
+        }
       } else {
-        respDisplay.value = 'Не призначено';
-        respDisplay.dataset.userId = '';
+        respSelect.innerHTML = '<option value="">Не призначено</option>';
       }
     } catch (e) {
-      respDisplay.value = 'Помилка визначення';
+      respSelect.innerHTML = '<option value="">Помилка визначення</option>';
     }
   }
 
-  document.getElementById('object_id').addEventListener('change', updateResponsible);
-  await updateResponsible();
+  document.getElementById('object_id').addEventListener('change', () => {
+    applySuggestedCustomer();
+    updateResponsibleOptions();
+  });
+
+  // Початкове заповнення при відкритті форми: в режимі редагування зберігаємо
+  // раніше введений замовник (якщо оператор його правив вручну), інакше — з об'єкта.
+  if (isEdit && existingReport.customer_name) {
+    document.getElementById('customer_name').value = existingReport.customer_name;
+  } else {
+    applySuggestedCustomer();
+  }
+  await updateResponsibleOptions();
 
   // Відправка форми
   document.getElementById('report-form').addEventListener('submit', async (e) => {
@@ -349,9 +372,9 @@ async function renderOperatorForm(user, existingReport = null) {
     errorBox.classList.add('hidden');
 
     try {
-      const responsibleId = document.getElementById('responsible_display').dataset.userId;
+      const responsibleId = document.getElementById('responsible_id').value;
       if (!responsibleId) {
-        throw new Error('Не визначено відповідального за цей об\'єкт.');
+        throw new Error('Оберіть відповідального за цей об\'єкт.');
       }
 
       const discrepancyVisible = !document.getElementById('discrepancy-box').classList.contains('hidden');
@@ -385,18 +408,22 @@ async function renderOperatorForm(user, existingReport = null) {
       const startTime = document.getElementById('start_time').value;
       const endTime = document.getElementById('end_time').value;
       const lunchHours = parseFloat(document.getElementById('lunch_hours').value) || 0;
+      const repairHours = hasBreakdown ? (parseFloat(document.getElementById('repair_hours')?.value) || 0) : 0;
+      // Ремонт понад 30 хв повністю віднімається від загальних (людино)годин
+      const repairDeduction = repairHours > 0.5 ? repairHours : 0;
 
       const [sh, sm] = startTime.split(':').map(Number);
       const [eh, em] = endTime.split(':').map(Number);
       let diffHours = (eh + em / 60) - (sh + sm / 60);
       if (diffHours < 0) diffHours += 24;
-      const totalPersonHours = Math.round((diffHours - lunchHours) * 100) / 100;
+      const totalPersonHours = Math.round((diffHours - lunchHours - repairDeduction) * 100) / 100;
 
       const payload = {
         work_date: document.getElementById('work_date').value,
         operator_id: user.id,
         equipment_id: document.getElementById('equipment_id').value,
         object_id: document.getElementById('object_id').value,
+        customer_name: document.getElementById('customer_name').value.trim() || null,
         responsible_id: responsibleId,
         start_hours: startHoursVal,
         end_hours: endHoursVal,
@@ -416,7 +443,7 @@ async function renderOperatorForm(user, existingReport = null) {
         fueling_source: document.getElementById('fueling_source').value || null,
         has_breakdown: hasBreakdown,
         breakdown_description: hasBreakdown ? breakdownDescription : null,
-        repair_hours: parseFloat(document.getElementById('repair_hours')?.value) || 0,
+        repair_hours: repairHours,
         operator_note: document.getElementById('operator_note').value || null
       };
 
