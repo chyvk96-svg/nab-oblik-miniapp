@@ -60,6 +60,11 @@ async function renderMyReports(user) {
     return;
   }
 
+  // Для звітів, повернутих на коригування, підтягуємо причину відхилення
+  // (вона зберігається окремо, в таблиці approvals, а не в самому звіті).
+  const correctionIds = reports.filter(r => r.status === 'Повернено на коригування').map(r => r.id);
+  const rejectionComments = await fetchLatestRejectionComments(correctionIds);
+
   listEl.className = '';
   listEl.innerHTML = reports.map(r => `
     <div class="report-card">
@@ -69,7 +74,11 @@ async function renderMyReports(user) {
       </div>
       ${reportDetailsHtml(r)}
       ${r.status === 'Повернено на коригування'
-        ? `<button class="btn-confirm" style="margin-top:10px" data-edit-id="${r.id}">Редагувати</button>`
+        ? `<div class="discrepancy-box" style="margin-top:10px">
+             <div class="flag">⚠ ПРИЧИНА ПОВЕРНЕННЯ НА КОРИГУВАННЯ</div>
+             ${rejectionComments[r.id] || 'Причину не вказано.'}
+           </div>
+           <button class="btn-confirm" style="margin-top:10px" data-edit-id="${r.id}">Редагувати</button>`
         : ''}
     </div>
   `).join('');
@@ -94,6 +103,25 @@ async function renderMyReports(user) {
       }
     });
   });
+}
+
+// Повертає мапу { report_id: останній коментар відхилення } для переданого
+// списку id звітів (запит в таблицю approvals, result = "Відхилено").
+async function fetchLatestRejectionComments(reportIds) {
+  if (!reportIds || reportIds.length === 0) return {};
+  try {
+    const rows = await supaGet(
+      'approvals',
+      `report_id=in.(${reportIds.join(',')})&result=eq.Відхилено&select=report_id,comment,confirmed_at&order=confirmed_at.desc`
+    );
+    const map = {};
+    (rows || []).forEach(row => {
+      if (!map[row.report_id]) map[row.report_id] = row.comment; // перший запис по кожному id — найновіший (сортовано desc)
+    });
+    return map;
+  } catch (e) {
+    return {};
+  }
 }
 
 // ---------- Екран оператора: форма щоденного звіту ----------
@@ -128,6 +156,14 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   const confirmedHoursMap = {};
   myEquipment.forEach(ue => { confirmedHoursMap[ue.equipment.id] = ue.equipment.confirmed_hours; });
 
+  // Якщо це редагування раніше відхиленого звіту — підтягуємо причину коригування,
+  // щоб оператор одразу бачив, що саме треба виправити.
+  let rejectionComment = null;
+  if (isEdit) {
+    const comments = await fetchLatestRejectionComments([existingReport.id]);
+    rejectionComment = comments[existingReport.id] || null;
+  }
+
   const today = new Date().toISOString().split('T')[0];
 
   const equipmentOptions = myEquipment
@@ -141,6 +177,12 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     ${topbarHtml(isEdit ? 'Редагування звіту' : 'Внести дані', `Оператор: ${user.full_name}`)}
     <div class="wrap">
     <div class="back-link" id="back-to-menu-form" style="margin:14px 0 0">← Назад до меню</div>
+    ${isEdit ? `
+      <div class="discrepancy-box" style="margin-top:14px">
+        <div class="flag">⚠ ПРИЧИНА ПОВЕРНЕННЯ НА КОРИГУВАННЯ</div>
+        ${rejectionComment || 'Причину не вказано.'}
+      </div>
+    ` : ''}
     <form id="report-form">
 
       <div class="section">
