@@ -1,4 +1,4 @@
-    :root {
+  :root {
     --asphalt: #141311;
     --concrete: #F3F1EA;
     --steel: #D8D4C8;
@@ -248,13 +248,23 @@
     margin-top: 2px;
   }
   .back-link {
-    display: inline-block;
-    padding: 14px 16px 0;
-    font-family: 'Space Mono', monospace;
-    font-size: 12px;
-    color: var(--ink-soft);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--brand-yellow);
+    border-radius: 4px;
+    font-family: 'Oswald', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--ink);
     cursor: pointer;
   }
+  .back-link:active { background: var(--steel); }
 
   .report-card {
     background: #fff;
