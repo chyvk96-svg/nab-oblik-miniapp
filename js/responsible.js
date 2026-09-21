@@ -496,6 +496,10 @@ function reportDetailsHtml(r) {
   const customerLine = r.customer_name
     ? `<div class="detail-row"><span class="label">Замовник:</span> ${r.customer_name}</div>`
     : '';
+  // Час фінального підтвердження — показується лише для вже закритих звітів
+  const closedLine = r.final_closed_at
+    ? `<div class="meta" style="margin-top:2px">Підтверджено: ${formatDateTimeUA(r.final_closed_at)}</div>`
+    : '';
 
   return `
     <div class="operator-name">${r.users?.full_name || '—'}</div>
@@ -513,6 +517,7 @@ function reportDetailsHtml(r) {
     ${startNoteLine}
     ${noteLine}
     <div class="meta" style="margin-top:4px">Подано: ${formatDateTimeUA(r.submitted_at)}</div>
+    ${closedLine}
   `;
 }
 
@@ -522,7 +527,7 @@ const REPORT_SELECT_FIELDS = 'id,work_date,status,equipment_id,customer_name,sta
   'lunch_hours,total_person_hours,travel_hours,travel_route,transported_people,transport_route,transport_hours,' +
   'downtime_hours,downtime_reason,fueling_liters,fueling_source,' +
   'has_breakdown,breakdown_description,repair_hours,start_hours_note,' +
-  'operator_note,submitted_at,equipment(name),objects(name),users!daily_reports_operator_id_fkey(full_name)';
+  'operator_note,submitted_at,final_closed_at,equipment(name),objects(name),users!daily_reports_operator_id_fkey(full_name)';
 
 async function renderPendingApprovals(user) {
   app.innerHTML = `
