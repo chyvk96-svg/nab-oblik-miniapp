@@ -140,7 +140,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   try {
     myEquipment = await supaGet(
       'user_equipment',
-      `user_id=eq.${user.id}&status=eq.Активна&select=equipment_id,equipment(id,name,confirmed_hours)`
+      `user_id=eq.${user.id}&status=eq.Активна&select=equipment_id,equipment(id,name,confirmed_hours,tracks_moto_hours)`
     );
     objects = await supaGet('objects', `status=eq.Активний&select=id,name,customer_id,customers(name)`);
   } catch (e) {
@@ -154,7 +154,11 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   }
 
   const confirmedHoursMap = {};
-  myEquipment.forEach(ue => { confirmedHoursMap[ue.equipment.id] = ue.equipment.confirmed_hours; });
+  const tracksMotoHoursMap = {};
+  myEquipment.forEach(ue => {
+    confirmedHoursMap[ue.equipment.id] = ue.equipment.confirmed_hours;
+    tracksMotoHoursMap[ue.equipment.id] = ue.equipment.tracks_moto_hours !== false;
+  });
 
   // Якщо це редагування раніше відхиленого звіту — підтягуємо причину коригування,
   // щоб оператор одразу бачив, що саме треба виправити.
@@ -206,6 +210,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
 
       <div class="section">
         <div class="section-title"><span class="n">2</span><span class="icon">⏱️</span>Мотогодини</div>
+        <div class="hint-inline hidden" id="moto-hours-disabled-note">Ця техніка не рахує мотогодини — поле недоступне.</div>
 
         <div class="row2">
           <div>
@@ -332,8 +337,46 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     checkDiscrepancy();
   }
 
+  // Вмикає/вимикає поля мотогодин залежно від того, чи техніка їх взагалі
+  // рахує (tracks_moto_hours). Для техніки без мотогодин (наприклад,
+  // водовозки без справного спідометра) поля стають неактивними й
+  // необов'язковими, замість того щоб змушувати оператора вводити фіктивні дані.
+  function applyMotoHoursAvailability() {
+    const equipmentId = document.getElementById('equipment_id').value;
+    const tracksMotoHours = tracksMotoHoursMap[equipmentId] !== false;
+
+    const startInput = document.getElementById('start_hours');
+    const endInput = document.getElementById('end_hours');
+    const startHint = document.getElementById('start-hours-hint');
+    const endHint = document.getElementById('end-hours-hint');
+    const disabledNote = document.getElementById('moto-hours-disabled-note');
+    const box = document.getElementById('discrepancy-box');
+
+    if (tracksMotoHours) {
+      startInput.disabled = false;
+      endInput.disabled = false;
+      startInput.required = true;
+      endInput.required = true;
+      disabledNote.classList.add('hidden');
+      applySuggestedStartHours();
+    } else {
+      startInput.disabled = true;
+      endInput.disabled = true;
+      startInput.required = false;
+      endInput.required = false;
+      startInput.value = '';
+      endInput.value = '';
+      delete startInput.dataset.suggested;
+      startHint.textContent = '';
+      endHint.textContent = '';
+      box.classList.add('hidden');
+      disabledNote.classList.remove('hidden');
+    }
+  }
+
   function checkDiscrepancy() {
     const startInput = document.getElementById('start_hours');
+    if (startInput.disabled) return;
     const suggested = parseFloat(startInput.dataset.suggested);
     const current = parseFloat(startInput.value);
     const box = document.getElementById('discrepancy-box');
@@ -341,21 +384,23 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     box.classList.toggle('hidden', !isDifferent);
   }
 
-  document.getElementById('equipment_id').addEventListener('change', applySuggestedStartHours);
+  document.getElementById('equipment_id').addEventListener('change', applyMotoHoursAvailability);
   document.getElementById('start_hours').addEventListener('input', () => { checkDiscrepancy(); checkEndHours(); });
 
-  applySuggestedStartHours();
+  applyMotoHoursAvailability();
 
   // Якщо є чернетка (редагування або повернення з перегляду) — підставляємо
   // реальне значення, яке оператор вводив раніше (могло відрізнятись від
-  // підтвердженого техніки).
-  if (prefill) {
+  // підтвердженого техніки). Лише для техніки, яка рахує мотогодини.
+  if (prefill && tracksMotoHoursMap[document.getElementById('equipment_id').value] !== false) {
     document.getElementById('start_hours').value = prefill.start_hours;
     checkDiscrepancy();
   }
 
   function checkEndHours() {
-    const start = parseFloat(document.getElementById('start_hours').value);
+    const startInput = document.getElementById('start_hours');
+    if (startInput.disabled) return;
+    const start = parseFloat(startInput.value);
     const end = parseFloat(document.getElementById('end_hours').value);
     const hint = document.getElementById('end-hours-hint');
     if (!isNaN(start) && !isNaN(end) && end < start) {
@@ -441,16 +486,26 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         throw new Error('Оберіть відповідального за цей об\'єкт.');
       }
 
-      const discrepancyVisible = !document.getElementById('discrepancy-box').classList.contains('hidden');
-      const startHoursNote = document.getElementById('start_hours_note').value.trim();
-      if (discrepancyVisible && !startHoursNote) {
-        throw new Error('Вкажи причину розбіжності мотогодин перед відправкою.');
-      }
+      const equipmentId = document.getElementById('equipment_id').value;
+      const tracksMotoHours = tracksMotoHoursMap[equipmentId] !== false;
 
-      const startHoursVal = parseFloat(document.getElementById('start_hours').value);
-      const endHoursVal = parseFloat(document.getElementById('end_hours').value);
-      if (endHoursVal < startHoursVal) {
-        throw new Error('Кінцеві мотогодини не можуть бути меншими за початкові.');
+      let startHoursVal = null;
+      let endHoursVal = null;
+      let startHoursNote = null;
+
+      if (tracksMotoHours) {
+        const discrepancyVisible = !document.getElementById('discrepancy-box').classList.contains('hidden');
+        const noteVal = document.getElementById('start_hours_note').value.trim();
+        if (discrepancyVisible && !noteVal) {
+          throw new Error('Вкажи причину розбіжності мотогодин перед відправкою.');
+        }
+
+        startHoursVal = parseFloat(document.getElementById('start_hours').value);
+        endHoursVal = parseFloat(document.getElementById('end_hours').value);
+        if (endHoursVal < startHoursVal) {
+          throw new Error('Кінцеві мотогодини не можуть бути меншими за початкові.');
+        }
+        startHoursNote = discrepancyVisible ? noteVal : null;
       }
 
       const hasBreakdown = document.getElementById('has_breakdown').checked;
@@ -489,13 +544,13 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       const payload = {
         work_date: document.getElementById('work_date').value,
         operator_id: user.id,
-        equipment_id: document.getElementById('equipment_id').value,
+        equipment_id: equipmentId,
         object_id: document.getElementById('object_id').value,
         customer_name: document.getElementById('customer_name').value.trim() || null,
         responsible_id: responsibleId,
         start_hours: startHoursVal,
         end_hours: endHoursVal,
-        start_hours_note: discrepancyVisible ? startHoursNote : null,
+        start_hours_note: startHoursNote,
         start_time: startTime,
         end_time: endTime,
         lunch_hours: lunchHours,
@@ -535,7 +590,9 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
 // equipmentName/objectName: назви для відображення (у payload лише id).
 
 function renderReportPreview(user, payload, isEdit, existingReport, equipmentName, objectName) {
-  const totalMotoHours = Math.round((payload.end_hours - payload.start_hours) * 100) / 100;
+  const totalMotoHours = (payload.start_hours !== null && payload.end_hours !== null)
+    ? Math.round((payload.end_hours - payload.start_hours) * 100) / 100
+    : null;
 
   const displayReport = {
     ...payload,
