@@ -326,6 +326,12 @@ async function renderEditObject(user, objectId) {
   );
   const availableToAdd = respCandidates.filter(u => !assignedActiveUserIds.has(u.id));
 
+  // Розділяємо на активних (показуються завжди) і неактивних (згорнутий блок
+  // з можливістю повернути або видалити назавжди) — щоб зняті відповідальні
+  // не засмічували основний список.
+  const activeResponsible = (currentResponsible || []).filter(r => r.status === 'Активний');
+  const inactiveResponsible = (currentResponsible || []).filter(r => r.status !== 'Активний');
+
   bodyEl.className = '';
   bodyEl.innerHTML = `
     <form id="edit-object-form">
@@ -358,12 +364,12 @@ async function renderEditObject(user, objectId) {
     <div class="section">
       <div class="section-title"><span class="n">2</span><span class="icon">👥</span>Відповідальні за об'єкт</div>
       <div id="responsible-list">
-        ${(currentResponsible || []).length === 0 ? '<div class="hint-inline">Ще нікого не призначено.</div>' : ''}
-        ${(currentResponsible || []).map(r => `
+        ${activeResponsible.length === 0 ? '<div class="hint-inline">Ще нікого не призначено.</div>' : ''}
+        ${activeResponsible.map(r => `
           <div class="checkbox-row" style="justify-content:space-between">
             <label style="margin:0">${r.users?.full_name || '—'} (${r.users?.role || '—'})</label>
             <button type="button" class="btn-reject" style="flex:none;padding:8px 12px" data-toggle-resp="${r.id}" data-current-status="${r.status}">
-              ${r.status === 'Активний' ? 'Зняти' : 'Повернути'}
+              Зняти
             </button>
           </div>
         `).join('')}
@@ -375,6 +381,21 @@ async function renderEditObject(user, objectId) {
           ${availableToAdd.map(u => `<option value="${u.id}">${u.full_name} (${u.role})</option>`).join('')}
         </select>
         <button type="button" class="btn-add-top" id="btn-add-responsible" style="margin-top:10px">+ Додати</button>
+      ` : ''}
+
+      ${inactiveResponsible.length > 0 ? `
+        <div class="hint-inline" id="toggle-inactive-resp" style="margin-top:18px;cursor:pointer">▸ Неактивні (${inactiveResponsible.length})</div>
+        <div id="inactive-responsible-list" class="hidden">
+          ${inactiveResponsible.map(r => `
+            <div class="checkbox-row" style="justify-content:space-between">
+              <label style="margin:0">${r.users?.full_name || '—'} (${r.users?.role || '—'})</label>
+              <div style="display:flex;gap:8px;flex:none">
+                <button type="button" class="btn-confirm" style="flex:none;padding:8px 12px" data-toggle-resp="${r.id}" data-current-status="${r.status}">Повернути</button>
+                <button type="button" class="btn-reject" style="flex:none;padding:8px 12px" data-delete-resp="${r.id}">Видалити</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
       ` : ''}
     </div>
   `;
@@ -435,6 +456,32 @@ async function renderEditObject(user, objectId) {
       }
     });
   });
+
+  document.querySelectorAll('[data-delete-resp]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Видалити цей запис назавжди? Дію не можна скасувати.')) return;
+      const originalLabel = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        await supaDelete('object_responsible', `id=eq.${btn.dataset.deleteResp}`);
+        renderEditObject(user, objectId);
+      } catch (e) {
+        alert('Помилка: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
+    });
+  });
+
+  const toggleInactiveEl = document.getElementById('toggle-inactive-resp');
+  if (toggleInactiveEl) {
+    toggleInactiveEl.addEventListener('click', () => {
+      const inactiveListEl = document.getElementById('inactive-responsible-list');
+      const nowHidden = inactiveListEl.classList.toggle('hidden');
+      toggleInactiveEl.textContent = `${nowHidden ? '▸' : '▾'} Неактивні (${inactiveResponsible.length})`;
+    });
+  }
 
   const addRespBtn = document.getElementById('btn-add-responsible');
   if (addRespBtn) {
