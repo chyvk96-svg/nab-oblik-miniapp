@@ -55,13 +55,14 @@ async function supaDelete(table, filterQuery) {
     headers: {
       'apikey': SUPABASE_KEY,
       'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'Prefer': 'return=minimal'
+      'Prefer': 'return=representation'
     }
   });
   if (!res.ok) {
     const errText = await res.text();
     throw new Error(`Помилка видалення з ${table}: ${errText}`);
   }
+  return res.json();
 }
 
 async function supaRpc(fnName, params) {
