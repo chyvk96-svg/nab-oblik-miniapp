@@ -204,7 +204,7 @@ async function renderEquipmentList(user) {
 
   let equipmentList;
   try {
-    equipmentList = await supaGet('equipment', `select=id,name,brand_model,reg_number,status,tracks_moto_hours&order=status.asc,name.asc`);
+    equipmentList = await supaGet('equipment', `select=id,name,brand_model,reg_number,status,tracks_moto_hours,tracks_odometer&order=status.asc,name.asc`);
   } catch (e) {
     listEl.textContent = 'Помилка завантаження: ' + e.message;
     return;
@@ -222,7 +222,7 @@ async function renderEquipmentList(user) {
         <span class="date">${eq.name}</span>
         <span class="status-chip ${eq.status === 'Активна' ? 'status-final' : 'status-corr'}">${eq.status}</span>
       </div>
-      <div class="meta">${eq.brand_model || '—'} · номер: ${eq.reg_number || '—'}${eq.tracks_moto_hours === false ? ' · без мотогодин' : ''}</div>
+      <div class="meta">${eq.brand_model || '—'} · номер: ${eq.reg_number || '—'}${eq.tracks_moto_hours === false ? ' · без мотогодин' : ''}${eq.tracks_odometer ? ' · спідометр' : ''}</div>
       <div class="item-actions">
         <button type="button" class="btn-confirm" data-edit-eq="${eq.id}">Редагувати</button>
         <button type="button" class="btn-reject" data-toggle-eq="${eq.id}" data-current-status="${eq.status}">
@@ -282,6 +282,15 @@ async function renderAddEquipment(user) {
           <input type="number" step="0.1" id="new_eq_confirmed_hours" value="0">
           <div class="hint-inline">Оператор при першому звіті побачить це значення як підтверджене — почне відлік саме від нього.</div>
 
+          <div class="checkbox-row">
+            <input type="checkbox" id="new_eq_tracks_odometer">
+            <label for="new_eq_tracks_odometer">Рахує кілометраж (спідометр)</label>
+          </div>
+          <div class="hint-inline">Познач для техніки зі справним спідометром (водовозка зі спідометром, автогудронатор, МАН тощо) — тоді в звіті зʼявиться поле показників спідометра.</div>
+
+          <label>Зафіксовані початкові кілометри</label>
+          <input type="number" step="0.1" id="new_eq_confirmed_km" value="0" disabled>
+
           <label>Примітка</label>
           <textarea id="new_eq_note" placeholder="Необов'язково"></textarea>
         </div>
@@ -298,11 +307,19 @@ async function renderAddEquipment(user) {
   const errorBox = document.getElementById('add-equipment-error-box');
   const tracksCheckbox = document.getElementById('new_eq_tracks_moto_hours');
   const confirmedHoursInput = document.getElementById('new_eq_confirmed_hours');
+  const tracksOdometerCheckbox = document.getElementById('new_eq_tracks_odometer');
+  const confirmedKmInput = document.getElementById('new_eq_confirmed_km');
 
   // Якщо техніка не рахує мотогодини — поле початкового значення теж не потрібне
   tracksCheckbox.addEventListener('change', () => {
     confirmedHoursInput.disabled = !tracksCheckbox.checked;
     if (!tracksCheckbox.checked) confirmedHoursInput.value = '';
+  });
+
+  // Те саме для кілометражу
+  tracksOdometerCheckbox.addEventListener('change', () => {
+    confirmedKmInput.disabled = !tracksOdometerCheckbox.checked;
+    confirmedKmInput.value = tracksOdometerCheckbox.checked ? '0' : '';
   });
 
   form.addEventListener('submit', async (e) => {
@@ -314,6 +331,8 @@ async function renderAddEquipment(user) {
     const regNumber = document.getElementById('new_eq_reg_number').value.trim();
     const tracksMotoHours = tracksCheckbox.checked;
     const confirmedHours = tracksMotoHours ? (parseFloat(confirmedHoursInput.value) || 0) : null;
+    const tracksOdometer = tracksOdometerCheckbox.checked;
+    const confirmedKm = tracksOdometer ? (parseFloat(confirmedKmInput.value) || 0) : null;
     const note = document.getElementById('new_eq_note').value.trim();
 
     if (!name) {
@@ -335,6 +354,8 @@ async function renderAddEquipment(user) {
         status: 'Активна',
         tracks_moto_hours: tracksMotoHours,
         confirmed_hours: confirmedHours,
+        tracks_odometer: tracksOdometer,
+        confirmed_km: confirmedKm,
         note: note || null
       });
 
@@ -371,7 +392,7 @@ async function renderEditEquipment(user, equipmentId) {
 
   let eq;
   try {
-    const rows = await supaGet('equipment', `id=eq.${equipmentId}&select=id,name,brand_model,reg_number,note,status,tracks_moto_hours`);
+    const rows = await supaGet('equipment', `id=eq.${equipmentId}&select=id,name,brand_model,reg_number,note,status,tracks_moto_hours,tracks_odometer`);
     eq = rows && rows[0];
   } catch (e) {
     bodyEl.textContent = 'Помилка завантаження: ' + e.message;
@@ -404,6 +425,12 @@ async function renderEditEquipment(user, equipmentId) {
         </div>
         <div class="hint-inline">Зніми позначку для техніки без лічильника мотогодин (наприклад, водовозка) — тоді в звіті оператора поле мотогодин буде неактивне й необов'язкове.</div>
 
+        <div class="checkbox-row">
+          <input type="checkbox" id="edit_eq_tracks_odometer" ${eq.tracks_odometer ? 'checked' : ''}>
+          <label for="edit_eq_tracks_odometer">Рахує кілометраж (спідометр)</label>
+        </div>
+        <div class="hint-inline">Познач для техніки зі справним спідометром — тоді в звіті зʼявиться поле показників спідометра.</div>
+
         <label>Примітка</label>
         <textarea id="edit_eq_note">${eq.note || ''}</textarea>
       </div>
@@ -425,6 +452,7 @@ async function renderEditEquipment(user, equipmentId) {
     const brandModel = document.getElementById('edit_eq_brand_model').value.trim();
     const regNumber = document.getElementById('edit_eq_reg_number').value.trim();
     const tracksMotoHours = document.getElementById('edit_eq_tracks_moto_hours').checked;
+    const tracksOdometer = document.getElementById('edit_eq_tracks_odometer').checked;
     const note = document.getElementById('edit_eq_note').value.trim();
 
     if (!name) {
@@ -442,6 +470,7 @@ async function renderEditEquipment(user, equipmentId) {
         brand_model: brandModel || null,
         reg_number: regNumber || null,
         tracks_moto_hours: tracksMotoHours,
+        tracks_odometer: tracksOdometer,
         note: note || null
       });
       renderEquipmentList(user);
