@@ -746,7 +746,7 @@ async function renderApprovalHistory(user) {
   try {
     reports = await supaGet(
       'daily_reports',
-      `responsible_id=eq.${user.id}&status=neq.Очікує відповідального&select=${REPORT_SELECT_FIELDS}&order=work_date.desc`
+      `responsible_id=eq.${user.id}&status=not.in.(Очікує відповідального,Чернетка)&select=${REPORT_SELECT_FIELDS}&order=work_date.desc`
     );
   } catch (e) {
     document.getElementById('history-list').textContent = 'Помилка завантаження: ' + e.message;
