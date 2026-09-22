@@ -49,6 +49,21 @@ async function supaUpdate(table, filterQuery, data) {
   return res.json();
 }
 
+async function supaDelete(table, filterQuery) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${filterQuery}`, {
+    method: 'DELETE',
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Prefer': 'return=minimal'
+    }
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Помилка видалення з ${table}: ${errText}`);
+  }
+}
+
 async function supaRpc(fnName, params) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fnName}`, {
     method: 'POST',
