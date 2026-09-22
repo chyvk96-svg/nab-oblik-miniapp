@@ -140,7 +140,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   try {
     myEquipment = await supaGet(
       'user_equipment',
-      `user_id=eq.${user.id}&status=eq.Активна&select=equipment_id,equipment(id,name,confirmed_hours,tracks_moto_hours)`
+      `user_id=eq.${user.id}&status=eq.Активна&select=equipment_id,equipment(id,name,confirmed_hours,tracks_moto_hours,confirmed_km,tracks_odometer)`
     );
     objects = await supaGet('objects', `status=eq.Активний&select=id,name,customer_id,customers(name)`);
   } catch (e) {
@@ -155,9 +155,13 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
 
   const confirmedHoursMap = {};
   const tracksMotoHoursMap = {};
+  const confirmedKmMap = {};
+  const tracksOdometerMap = {};
   myEquipment.forEach(ue => {
     confirmedHoursMap[ue.equipment.id] = ue.equipment.confirmed_hours;
     tracksMotoHoursMap[ue.equipment.id] = ue.equipment.tracks_moto_hours !== false;
+    confirmedKmMap[ue.equipment.id] = ue.equipment.confirmed_km;
+    tracksOdometerMap[ue.equipment.id] = ue.equipment.tracks_odometer === true;
   });
 
   // Якщо це редагування раніше відхиленого звіту — підтягуємо причину коригування,
@@ -232,8 +236,25 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         </div>
       </div>
 
+      <div class="section hidden" id="odometer-section">
+        <div class="section-title"><span class="n">3</span><span class="icon">🛣️</span>Показники спідометра</div>
+
+        <div class="row2">
+          <div>
+            <label>Початок, км</label>
+            <input type="number" step="0.1" class="numeric" id="start_km">
+            <div class="hint-inline" id="start-km-hint"></div>
+          </div>
+          <div>
+            <label>Кінець, км</label>
+            <input type="number" step="0.1" class="numeric" id="end_km" value="${prefill ? prefill.end_km : ''}">
+            <div class="hint-inline" id="end-km-hint"></div>
+          </div>
+        </div>
+      </div>
+
       <div class="section">
-        <div class="section-title"><span class="n">3</span><span class="icon">🕐</span>Час роботи</div>
+        <div class="section-title"><span class="n">4</span><span class="icon">🕐</span>Час роботи</div>
 
         <div class="row2">
           <div>
@@ -251,7 +272,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       </div>
 
       <div class="section">
-        <div class="section-title"><span class="n">4</span><span class="icon">🚗</span>Перебазування техніки</div>
+        <div class="section-title"><span class="n">5</span><span class="icon">🚗</span>Перебазування техніки</div>
         <label>Години</label>
         <input type="number" step="0.1" id="travel_hours" value="${prefill ? (prefill.travel_hours || 0) : '0'}">
         <label>Опис маршруту</label>
@@ -259,7 +280,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       </div>
 
       <div class="section">
-        <div class="section-title"><span class="n">5</span><span class="icon">🚌</span>Перевезення людей</div>
+        <div class="section-title"><span class="n">6</span><span class="icon">🚌</span>Перевезення людей</div>
 
         <div class="checkbox-row" style="margin-top:0; border-top:none; padding-top:0">
           <input type="checkbox" id="transported_people"${prefill && prefill.transported_people ? ' checked' : ''}>
@@ -275,7 +296,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       </div>
 
       <div class="section">
-        <div class="section-title"><span class="n">6</span><span class="icon">⏸</span>Простій</div>
+        <div class="section-title"><span class="n">7</span><span class="icon">⏸</span>Простій</div>
         <label>Години</label>
         <input type="number" step="0.1" id="downtime_hours" value="${prefill ? (prefill.downtime_hours || 0) : '0'}">
         <label>Причина</label>
@@ -283,7 +304,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       </div>
 
       <div class="section">
-        <div class="section-title"><span class="n">7</span><span class="icon">⛽</span>Заправка та поломки</div>
+        <div class="section-title"><span class="n">8</span><span class="icon">⛽</span>Заправка та поломки</div>
         <label>Заправка, л</label>
         <input type="number" step="0.1" id="fueling_liters" value="${prefill ? (prefill.fueling_liters || 0) : '0'}">
         <label>Звідки заправились</label>
@@ -303,7 +324,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       </div>
 
       <div class="section">
-        <div class="section-title"><span class="n">8</span><span class="icon">📝</span>Примітка</div>
+        <div class="section-title"><span class="n">9</span><span class="icon">📝</span>Примітка</div>
         <textarea id="operator_note" placeholder="Довільний коментар до звіту">${prefill && prefill.operator_note ? prefill.operator_note : ''}</textarea>
       </div>
 
@@ -384,10 +405,61 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     box.classList.toggle('hidden', !isDifferent);
   }
 
-  document.getElementById('equipment_id').addEventListener('change', applyMotoHoursAvailability);
+  // Вмикає/вимикає блок "Показники спідометра" залежно від tracks_odometer
+  // обраної техніки. На відміну від мотогодин, тут немає розбіжностей —
+  // просто підставляємо підтверджене значення як початок.
+  function applyOdometerAvailability() {
+    const equipmentId = document.getElementById('equipment_id').value;
+    const tracksOdometer = tracksOdometerMap[equipmentId] === true;
+
+    const section = document.getElementById('odometer-section');
+    const startInput = document.getElementById('start_km');
+    const endInput = document.getElementById('end_km');
+    const startHint = document.getElementById('start-km-hint');
+    const endHint = document.getElementById('end-km-hint');
+
+    if (tracksOdometer) {
+      section.classList.remove('hidden');
+      startInput.required = true;
+      endInput.required = true;
+      const confirmed = confirmedKmMap[equipmentId];
+      startInput.dataset.suggested = confirmed;
+      startInput.value = confirmed;
+      startHint.innerHTML = `Підтверджене значення техніки: <b>${confirmed}</b>`;
+    } else {
+      section.classList.add('hidden');
+      startInput.required = false;
+      endInput.required = false;
+      startInput.value = '';
+      endInput.value = '';
+      delete startInput.dataset.suggested;
+      startHint.textContent = '';
+      endHint.textContent = '';
+    }
+  }
+
+  function checkEndKm() {
+    const startInput = document.getElementById('start_km');
+    if (!tracksOdometerMap[document.getElementById('equipment_id').value]) return;
+    const start = parseFloat(startInput.value);
+    const end = parseFloat(document.getElementById('end_km').value);
+    const hint = document.getElementById('end-km-hint');
+    if (!isNaN(start) && !isNaN(end) && end < start) {
+      hint.innerHTML = `<span style="color: var(--danger)">⚠ Менше за початкові (${start})</span>`;
+    } else {
+      hint.textContent = '';
+    }
+  }
+  document.getElementById('end_km').addEventListener('input', checkEndKm);
+
+  document.getElementById('equipment_id').addEventListener('change', () => {
+    applyMotoHoursAvailability();
+    applyOdometerAvailability();
+  });
   document.getElementById('start_hours').addEventListener('input', () => { checkDiscrepancy(); checkEndHours(); });
 
   applyMotoHoursAvailability();
+  applyOdometerAvailability();
 
   // Якщо є чернетка (редагування або повернення з перегляду) — підставляємо
   // реальне значення, яке оператор вводив раніше (могло відрізнятись від
@@ -395,6 +467,10 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   if (prefill && tracksMotoHoursMap[document.getElementById('equipment_id').value] !== false) {
     document.getElementById('start_hours').value = prefill.start_hours;
     checkDiscrepancy();
+  }
+  if (prefill && tracksOdometerMap[document.getElementById('equipment_id').value] === true) {
+    document.getElementById('start_km').value = prefill.start_km;
+    checkEndKm();
   }
 
   function checkEndHours() {
@@ -508,6 +584,21 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         startHoursNote = discrepancyVisible ? noteVal : null;
       }
 
+      const tracksOdometer = tracksOdometerMap[equipmentId] === true;
+      let startKmVal = null;
+      let endKmVal = null;
+
+      if (tracksOdometer) {
+        startKmVal = parseFloat(document.getElementById('start_km').value);
+        endKmVal = parseFloat(document.getElementById('end_km').value);
+        if (isNaN(startKmVal) || isNaN(endKmVal)) {
+          throw new Error('Вкажи показники спідометра (початок і кінець).');
+        }
+        if (endKmVal < startKmVal) {
+          throw new Error('Кінцеві кілометри не можуть бути меншими за початкові.');
+        }
+      }
+
       const hasBreakdown = document.getElementById('has_breakdown').checked;
       const breakdownDescription = document.getElementById('breakdown_description').value.trim();
       if (hasBreakdown && !breakdownDescription) {
@@ -551,6 +642,8 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         start_hours: startHoursVal,
         end_hours: endHoursVal,
         start_hours_note: startHoursNote,
+        start_km: startKmVal,
+        end_km: endKmVal,
         start_time: startTime,
         end_time: endTime,
         lunch_hours: lunchHours,
@@ -593,10 +686,14 @@ function renderReportPreview(user, payload, isEdit, existingReport, equipmentNam
   const totalMotoHours = (payload.start_hours !== null && payload.end_hours !== null)
     ? Math.round((payload.end_hours - payload.start_hours) * 100) / 100
     : null;
+  const totalKm = (payload.start_km !== null && payload.end_km !== null)
+    ? Math.round((payload.end_km - payload.start_km) * 100) / 100
+    : null;
 
   const displayReport = {
     ...payload,
     total_moto_hours: totalMotoHours,
+    total_km: totalKm,
     users: { full_name: user.full_name },
     equipment: { name: equipmentName },
     objects: { name: objectName },
