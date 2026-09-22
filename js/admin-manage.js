@@ -204,7 +204,7 @@ async function renderEquipmentList(user) {
 
   let equipmentList;
   try {
-    equipmentList = await supaGet('equipment', `select=id,name,brand_model,reg_number,status&order=status.asc,name.asc`);
+    equipmentList = await supaGet('equipment', `select=id,name,brand_model,reg_number,status,tracks_moto_hours&order=status.asc,name.asc`);
   } catch (e) {
     listEl.textContent = 'Помилка завантаження: ' + e.message;
     return;
@@ -222,7 +222,7 @@ async function renderEquipmentList(user) {
         <span class="date">${eq.name}</span>
         <span class="status-chip ${eq.status === 'Активна' ? 'status-final' : 'status-corr'}">${eq.status}</span>
       </div>
-      <div class="meta">${eq.brand_model || '—'} · номер: ${eq.reg_number || '—'}</div>
+      <div class="meta">${eq.brand_model || '—'} · номер: ${eq.reg_number || '—'}${eq.tracks_moto_hours === false ? ' · без мотогодин' : ''}</div>
       <div class="item-actions">
         <button type="button" class="btn-confirm" data-edit-eq="${eq.id}">Редагувати</button>
         <button type="button" class="btn-reject" data-toggle-eq="${eq.id}" data-current-status="${eq.status}">
@@ -272,6 +272,12 @@ async function renderAddEquipment(user) {
           <label>Держ./інвентарний номер</label>
           <input type="text" id="new_eq_reg_number" placeholder="Необов'язково">
 
+          <div class="checkbox-row">
+            <input type="checkbox" id="new_eq_tracks_moto_hours" checked>
+            <label for="new_eq_tracks_moto_hours">Рахує мотогодини</label>
+          </div>
+          <div class="hint-inline">Зніми позначку для техніки без лічильника мотогодин (наприклад, водовозка) — тоді в звіті оператора поле мотогодин буде неактивне й необов'язкове.</div>
+
           <label>Примітка</label>
           <textarea id="new_eq_note" placeholder="Необов'язково"></textarea>
         </div>
@@ -294,6 +300,7 @@ async function renderAddEquipment(user) {
     const name = document.getElementById('new_eq_name').value.trim();
     const brandModel = document.getElementById('new_eq_brand_model').value.trim();
     const regNumber = document.getElementById('new_eq_reg_number').value.trim();
+    const tracksMotoHours = document.getElementById('new_eq_tracks_moto_hours').checked;
     const note = document.getElementById('new_eq_note').value.trim();
 
     if (!name) {
@@ -313,6 +320,7 @@ async function renderAddEquipment(user) {
         brand_model: brandModel || null,
         reg_number: regNumber || null,
         status: 'Активна',
+        tracks_moto_hours: tracksMotoHours,
         note: note || null
       });
 
@@ -349,7 +357,7 @@ async function renderEditEquipment(user, equipmentId) {
 
   let eq;
   try {
-    const rows = await supaGet('equipment', `id=eq.${equipmentId}&select=id,name,brand_model,reg_number,note,status`);
+    const rows = await supaGet('equipment', `id=eq.${equipmentId}&select=id,name,brand_model,reg_number,note,status,tracks_moto_hours`);
     eq = rows && rows[0];
   } catch (e) {
     bodyEl.textContent = 'Помилка завантаження: ' + e.message;
@@ -376,6 +384,12 @@ async function renderEditEquipment(user, equipmentId) {
         <label>Держ./інвентарний номер</label>
         <input type="text" id="edit_eq_reg_number" value="${eq.reg_number || ''}">
 
+        <div class="checkbox-row">
+          <input type="checkbox" id="edit_eq_tracks_moto_hours" ${eq.tracks_moto_hours !== false ? 'checked' : ''}>
+          <label for="edit_eq_tracks_moto_hours">Рахує мотогодини</label>
+        </div>
+        <div class="hint-inline">Зніми позначку для техніки без лічильника мотогодин (наприклад, водовозка) — тоді в звіті оператора поле мотогодин буде неактивне й необов'язкове.</div>
+
         <label>Примітка</label>
         <textarea id="edit_eq_note">${eq.note || ''}</textarea>
       </div>
@@ -396,6 +410,7 @@ async function renderEditEquipment(user, equipmentId) {
     const name = document.getElementById('edit_eq_name').value.trim();
     const brandModel = document.getElementById('edit_eq_brand_model').value.trim();
     const regNumber = document.getElementById('edit_eq_reg_number').value.trim();
+    const tracksMotoHours = document.getElementById('edit_eq_tracks_moto_hours').checked;
     const note = document.getElementById('edit_eq_note').value.trim();
 
     if (!name) {
@@ -412,6 +427,7 @@ async function renderEditEquipment(user, equipmentId) {
         name: name,
         brand_model: brandModel || null,
         reg_number: regNumber || null,
+        tracks_moto_hours: tracksMotoHours,
         note: note || null
       });
       renderEquipmentList(user);
