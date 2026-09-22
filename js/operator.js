@@ -210,6 +210,12 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
 
         <label>Відповідальний за об'єкт</label>
         <select id="responsible_id" required></select>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="on_base_only"${prefill && prefill.start_hours == null && prefill.start_km == null ? ' checked' : ''}>
+          <label for="on_base_only">Робота на базі / ремонт (тільки людиногодини)</label>
+        </div>
+        <div class="hint-inline">Познач, якщо сьогодні технікою не працювали по факту (стояла на базі, в ремонті тощо) — мотогодини й спідометр не вказуються, рахуються лише відпрацьовані години. Деталі вкажи в примітці.</div>
       </div>
 
       <div class="section">
@@ -364,7 +370,8 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   // необов'язковими, замість того щоб змушувати оператора вводити фіктивні дані.
   function applyMotoHoursAvailability() {
     const equipmentId = document.getElementById('equipment_id').value;
-    const tracksMotoHours = tracksMotoHoursMap[equipmentId] !== false;
+    const onBaseOnly = document.getElementById('on_base_only').checked;
+    const tracksMotoHours = !onBaseOnly && tracksMotoHoursMap[equipmentId] !== false;
 
     const startInput = document.getElementById('start_hours');
     const endInput = document.getElementById('end_hours');
@@ -410,7 +417,8 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   // просто підставляємо підтверджене значення як початок.
   function applyOdometerAvailability() {
     const equipmentId = document.getElementById('equipment_id').value;
-    const tracksOdometer = tracksOdometerMap[equipmentId] === true;
+    const onBaseOnly = document.getElementById('on_base_only').checked;
+    const tracksOdometer = !onBaseOnly && tracksOdometerMap[equipmentId] === true;
 
     const section = document.getElementById('odometer-section');
     const startInput = document.getElementById('start_km');
@@ -456,6 +464,10 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     applyMotoHoursAvailability();
     applyOdometerAvailability();
   });
+  document.getElementById('on_base_only').addEventListener('change', () => {
+    applyMotoHoursAvailability();
+    applyOdometerAvailability();
+  });
   document.getElementById('start_hours').addEventListener('input', () => { checkDiscrepancy(); checkEndHours(); });
 
   applyMotoHoursAvailability();
@@ -463,12 +475,13 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
 
   // Якщо є чернетка (редагування або повернення з перегляду) — підставляємо
   // реальне значення, яке оператор вводив раніше (могло відрізнятись від
-  // підтвердженого техніки). Лише для техніки, яка рахує мотогодини.
-  if (prefill && tracksMotoHoursMap[document.getElementById('equipment_id').value] !== false) {
+  // підтвердженого техніки). Лише для техніки, яка рахує мотогодини, і якщо
+  // це не був звіт "тільки людиногодини".
+  if (prefill && !document.getElementById('on_base_only').checked && tracksMotoHoursMap[document.getElementById('equipment_id').value] !== false) {
     document.getElementById('start_hours').value = prefill.start_hours;
     checkDiscrepancy();
   }
-  if (prefill && tracksOdometerMap[document.getElementById('equipment_id').value] === true) {
+  if (prefill && !document.getElementById('on_base_only').checked && tracksOdometerMap[document.getElementById('equipment_id').value] === true) {
     document.getElementById('start_km').value = prefill.start_km;
     checkEndKm();
   }
@@ -563,7 +576,8 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       }
 
       const equipmentId = document.getElementById('equipment_id').value;
-      const tracksMotoHours = tracksMotoHoursMap[equipmentId] !== false;
+      const onBaseOnly = document.getElementById('on_base_only').checked;
+      const tracksMotoHours = !onBaseOnly && tracksMotoHoursMap[equipmentId] !== false;
 
       let startHoursVal = null;
       let endHoursVal = null;
@@ -584,7 +598,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         startHoursNote = discrepancyVisible ? noteVal : null;
       }
 
-      const tracksOdometer = tracksOdometerMap[equipmentId] === true;
+      const tracksOdometer = !onBaseOnly && tracksOdometerMap[equipmentId] === true;
       let startKmVal = null;
       let endKmVal = null;
 
