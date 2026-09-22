@@ -278,6 +278,10 @@ async function renderAddEquipment(user) {
           </div>
           <div class="hint-inline">Зніми позначку для техніки без лічильника мотогодин (наприклад, водовозка) — тоді в звіті оператора поле мотогодин буде неактивне й необов'язкове.</div>
 
+          <label>Зафіксовані початкові мотогодини</label>
+          <input type="number" step="0.1" id="new_eq_confirmed_hours" value="0">
+          <div class="hint-inline">Оператор при першому звіті побачить це значення як підтверджене — почне відлік саме від нього.</div>
+
           <label>Примітка</label>
           <textarea id="new_eq_note" placeholder="Необов'язково"></textarea>
         </div>
@@ -292,6 +296,14 @@ async function renderAddEquipment(user) {
   const form = document.getElementById('add-equipment-form');
   const submitBtn = document.getElementById('add-equipment-submit-btn');
   const errorBox = document.getElementById('add-equipment-error-box');
+  const tracksCheckbox = document.getElementById('new_eq_tracks_moto_hours');
+  const confirmedHoursInput = document.getElementById('new_eq_confirmed_hours');
+
+  // Якщо техніка не рахує мотогодини — поле початкового значення теж не потрібне
+  tracksCheckbox.addEventListener('change', () => {
+    confirmedHoursInput.disabled = !tracksCheckbox.checked;
+    if (!tracksCheckbox.checked) confirmedHoursInput.value = '';
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -300,7 +312,8 @@ async function renderAddEquipment(user) {
     const name = document.getElementById('new_eq_name').value.trim();
     const brandModel = document.getElementById('new_eq_brand_model').value.trim();
     const regNumber = document.getElementById('new_eq_reg_number').value.trim();
-    const tracksMotoHours = document.getElementById('new_eq_tracks_moto_hours').checked;
+    const tracksMotoHours = tracksCheckbox.checked;
+    const confirmedHours = tracksMotoHours ? (parseFloat(confirmedHoursInput.value) || 0) : null;
     const note = document.getElementById('new_eq_note').value.trim();
 
     if (!name) {
@@ -321,6 +334,7 @@ async function renderAddEquipment(user) {
         reg_number: regNumber || null,
         status: 'Активна',
         tracks_moto_hours: tracksMotoHours,
+        confirmed_hours: confirmedHours,
         note: note || null
       });
 
