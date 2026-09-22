@@ -548,11 +548,15 @@ function reportDetailsHtml(r) {
     ? `<div class="meta" style="margin-top:2px">Підтверджено: ${formatDateTimeUA(r.final_closed_at)}</div>`
     : '';
 
+  const hoursLine = (r.start_hours !== null && r.start_hours !== undefined && r.end_hours !== null && r.end_hours !== undefined)
+    ? `<div class="hours">${r.start_hours} → ${r.end_hours} год (разом ${r.total_moto_hours})</div>`
+    : '';
+
   return `
     <div class="operator-name">${r.users?.full_name || '—'}</div>
     <div class="meta">${r.equipment?.name || '—'} · ${r.objects?.name || '—'}</div>
     ${customerLine}
-    <div class="hours">${r.start_hours} → ${r.end_hours} год (разом ${r.total_moto_hours})</div>
+    ${hoursLine}
     <div class="detail-row"><span class="label">Час роботи:</span> ${formatTimeUA(r.start_time)} – ${formatTimeUA(r.end_time)}, людиногодин: ${r.total_person_hours}</div>
     <div class="detail-row"><span class="label">Обід:</span> ${r.lunch_hours} год</div>
     ${travelLine}
@@ -670,9 +674,11 @@ async function confirmReport(user, reportId, equipmentId, endHours, btn) {
       final_closed_at: new Date().toISOString()
     });
 
-    await supaUpdate('equipment', `id=eq.${equipmentId}`, {
-      confirmed_hours: endHours
-    });
+    if (!isNaN(endHours)) {
+      await supaUpdate('equipment', `id=eq.${equipmentId}`, {
+        confirmed_hours: endHours
+      });
+    }
 
     document.getElementById(`card-${reportId}`).remove();
   } catch (e) {
