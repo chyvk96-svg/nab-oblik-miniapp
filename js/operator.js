@@ -9,6 +9,7 @@ const HOURS_EPSILON = 0.05; // допустима похибка при порі
 function renderOperatorHome(user) {
   app.innerHTML = `
     ${topbarHtml('Головне меню', `Оператор: ${user.full_name}`)}
+    <div class="wrap" style="padding-top:14px" id="drafts-banner-wrap"></div>
     <div class="menu-list">
       <button class="menu-btn" id="btn-new-report">
         <span class="emoji">🚜</span>
@@ -28,6 +29,78 @@ function renderOperatorHome(user) {
   `;
   document.getElementById('btn-new-report').addEventListener('click', () => renderOperatorForm(user));
   document.getElementById('btn-my-reports').addEventListener('click', () => renderMyReports(user));
+
+  loadDraftsBanner(user);
+}
+
+// ---------- Банер незавершених чернеток на головному екрані оператора ----------
+async function loadDraftsBanner(user) {
+  const wrap = document.getElementById('drafts-banner-wrap');
+  if (!wrap) return;
+
+  let drafts;
+  try {
+    drafts = await supaGet(
+      'daily_reports',
+      `operator_id=eq.${user.id}&status=eq.Чернетка&select=id,work_date,equipment_id,equipment(name)&order=work_date.desc`
+    );
+  } catch (e) {
+    return; // індикатор не критичний — тихо пропускаємо помилку
+  }
+
+  if (!drafts || drafts.length === 0) return;
+
+  wrap.innerHTML = `
+    <div class="discrepancy-box" style="margin:0 0 14px">
+      <div class="flag">📝 НЕЗАВЕРШЕНІ ЧЕРНЕТКИ (${drafts.length})</div>
+      ${drafts.map(d => `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px">
+          <span>${formatDateUA(d.work_date)} · ${d.equipment?.name || '—'}</span>
+          <span style="display:flex;gap:6px">
+            <button class="btn-confirm" style="padding:6px 10px" data-continue-id="${d.id}">Продовжити</button>
+            <button class="btn-reject" style="padding:6px 10px" data-delete-id="${d.id}">Видалити</button>
+          </span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  wrap.querySelectorAll('[data-continue-id]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.textContent = 'Завантаження...';
+      try {
+        const rows = await supaGet('daily_reports', `id=eq.${btn.dataset.continueId}&select=*`);
+        if (rows && rows.length > 0) {
+          renderOperatorForm(user, rows[0]);
+        } else {
+          alert('Чернетку не знайдено.');
+          btn.disabled = false;
+          btn.textContent = 'Продовжити';
+        }
+      } catch (e) {
+        alert('Помилка завантаження: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = 'Продовжити';
+      }
+    });
+  });
+
+  wrap.querySelectorAll('[data-delete-id]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Видалити цю чернетку без збереження?')) return;
+      btn.disabled = true;
+      btn.textContent = 'Видалення...';
+      try {
+        await supaDelete('daily_reports', `id=eq.${btn.dataset.deleteId}`);
+        loadDraftsBanner(user);
+      } catch (e) {
+        alert('Помилка видалення: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = 'Видалити';
+      }
+    });
+  });
 }
 
 // ---------- Мої записи: історія звітів оператора (розгорнуті картки) ----------
@@ -46,7 +119,7 @@ async function renderMyReports(user) {
   try {
     reports = await supaGet(
       'daily_reports',
-      `operator_id=eq.${user.id}&select=${REPORT_SELECT_FIELDS}&order=work_date.desc`
+      `operator_id=eq.${user.id}&status=neq.Чернетка&select=${REPORT_SELECT_FIELDS}&order=work_date.desc`
     );
   } catch (e) {
     document.getElementById('reports-list').textContent = 'Помилка завантаження: ' + e.message;
@@ -131,9 +204,15 @@ async function fetchLatestRejectionComments(reportIds) {
 // з якою оператор повернувся з екрана попереднього перегляду через "Редагувати"),
 // не впливає на isEdit/режим збереження.
 
-async function renderOperatorForm(user, existingReport = null, draftOverride = null) {
-  const isEdit = existingReport !== null;
+async function renderOperatorForm(user, existingReport = null, draftOverride = null, existingDraftId = null) {
+  const isDraftContinuation = existingReport !== null && existingReport.status === 'Чернетка';
+  const isEdit = existingReport !== null && !isDraftContinuation;
   const prefill = draftOverride || existingReport;
+  // currentDraftId відстежує рядок-чернетку в daily_reports протягом усієї
+  // роботи з формою (навіть якщо форма відкрита як "нова" — чернетка могла
+  // з'явитись сама, через автозбереження, ще до явного "Продовжити").
+  let currentDraftId = isDraftContinuation ? existingReport.id : existingDraftId;
+  let autosaveTimer = null;
 
   let myEquipment, objects;
 
@@ -182,9 +261,11 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     .join('');
 
   app.innerHTML = `
-    ${topbarHtml(isEdit ? 'Редагування звіту' : 'Внести дані', `Оператор: ${user.full_name}`)}
+    ${topbarHtml(isEdit ? 'Редагування звіту' : (isDraftContinuation ? 'Продовження чернетки' : 'Внести дані'), `Оператор: ${user.full_name}`)}
     <div class="wrap">
     <div class="back-link" id="back-to-menu-form" style="margin:14px 0 0">← Назад до меню</div>
+    <div class="hint-inline" id="draft-save-status" style="margin-top:6px"></div>
+    ${isDraftContinuation ? `<button type="button" id="delete-draft-btn" style="margin:4px 0 10px;background:none;border:1px solid var(--danger);color:var(--danger);padding:8px 14px;border-radius:4px;cursor:pointer">🗑 Видалити чернетку</button>` : ''}
     ${isEdit ? `
       <div class="discrepancy-box" style="margin-top:14px">
         <div class="flag">⚠ ПРИЧИНА ПОВЕРНЕННЯ НА КОРИГУВАННЯ</div>
@@ -212,7 +293,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         <select id="responsible_id" required></select>
 
         <div class="checkbox-row">
-          <input type="checkbox" id="on_base_only"${prefill && prefill.start_hours == null && prefill.start_km == null ? ' checked' : ''}>
+          <input type="checkbox" id="on_base_only"${prefill && !isDraftContinuation && prefill.start_hours == null && prefill.start_km == null ? ' checked' : ''}>
           <label for="on_base_only">Робота на базі / ремонт (тільки людиногодини)</label>
         </div>
         <div class="hint-inline">Познач, якщо сьогодні технікою не працювали по факту (стояла на базі, в ремонті тощо) — мотогодини й спідометр не вказуються, рахуються лише відпрацьовані години. Деталі вкажи в примітці.</div>
@@ -341,7 +422,10 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     </div>
   `;
 
-  document.getElementById('back-to-menu-form').addEventListener('click', () => renderOperatorHome(user));
+  document.getElementById('back-to-menu-form').addEventListener('click', () => {
+    clearTimeout(autosaveTimer);
+    renderOperatorHome(user);
+  });
 
   document.getElementById('has_breakdown').addEventListener('change', (e) => {
     document.getElementById('repair-block').classList.toggle('hidden', !e.target.checked);
@@ -561,10 +645,113 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   }
   await updateResponsibleOptions();
 
+  // ---------- Автозбереження чернетки ----------
+  // Періодично (з паузою після останньої дії оператора) зберігає поточний
+  // стан форми в daily_reports зі статусом "Чернетка" — без валідації, щоб
+  // оператор міг заповнити частину даних, вийти, і повернутись пізніше.
+  // Реальна відправка (валідація, статус "Очікує відповідального") лишається
+  // виключно в обробнику submit нижче.
+
+  function setDraftStatus(text) {
+    const el = document.getElementById('draft-save-status');
+    if (el) el.textContent = text;
+  }
+
+  async function saveDraft() {
+    if (!document.getElementById('report-form')) return; // форму вже закрито/замінено іншим екраном
+    const equipmentId = document.getElementById('equipment_id').value;
+    const objectId = document.getElementById('object_id').value;
+    if (!equipmentId || !objectId) return; // ще нема з чим зберігати чернетку
+
+    const num = (id) => {
+      const v = parseFloat(document.getElementById(id)?.value);
+      return isNaN(v) ? null : v;
+    };
+
+    const onBaseOnly = document.getElementById('on_base_only').checked;
+    const tracksMotoHours = !onBaseOnly && tracksMotoHoursMap[equipmentId] !== false;
+    const tracksOdometer = !onBaseOnly && tracksOdometerMap[equipmentId] === true;
+    const hasBreakdown = document.getElementById('has_breakdown').checked;
+    const transportedPeople = document.getElementById('transported_people').checked;
+
+    const draftPayload = {
+      work_date: document.getElementById('work_date').value || today,
+      operator_id: user.id,
+      equipment_id: equipmentId,
+      object_id: objectId,
+      customer_name: document.getElementById('customer_name').value.trim() || null,
+      responsible_id: document.getElementById('responsible_id').value || null,
+      start_hours: tracksMotoHours ? num('start_hours') : null,
+      end_hours: tracksMotoHours ? num('end_hours') : null,
+      start_hours_note: document.getElementById('start_hours_note')?.value.trim() || null,
+      start_km: tracksOdometer ? num('start_km') : null,
+      end_km: tracksOdometer ? num('end_km') : null,
+      start_time: document.getElementById('start_time').value || null,
+      end_time: document.getElementById('end_time').value || null,
+      lunch_hours: num('lunch_hours') || 0,
+      travel_hours: num('travel_hours') || 0,
+      travel_route: document.getElementById('travel_route').value || null,
+      transported_people: transportedPeople,
+      transport_route: transportedPeople ? (document.getElementById('transport_route').value.trim() || null) : null,
+      transport_hours: transportedPeople ? num('transport_hours') : null,
+      downtime_hours: num('downtime_hours') || 0,
+      downtime_reason: document.getElementById('downtime_reason').value || null,
+      fueling_liters: num('fueling_liters') || 0,
+      fueling_source: document.getElementById('fueling_source').value || null,
+      has_breakdown: hasBreakdown,
+      breakdown_description: hasBreakdown ? (document.getElementById('breakdown_description').value.trim() || null) : null,
+      repair_hours: hasBreakdown ? (num('repair_hours') || 0) : 0,
+      operator_note: document.getElementById('operator_note').value || null,
+      status: 'Чернетка'
+    };
+
+    try {
+      setDraftStatus('Збереження чернетки...');
+      if (currentDraftId) {
+        await supaUpdate('daily_reports', `id=eq.${currentDraftId}`, draftPayload);
+      } else {
+        currentDraftId = await supaRpc('next_id', { p_prefix: 'REP' });
+        draftPayload.id = currentDraftId;
+        draftPayload.submitted_at = null;
+        await supaInsert('daily_reports', draftPayload);
+      }
+      const now = new Date();
+      setDraftStatus(`Чернетку збережено о ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+    } catch (e) {
+      setDraftStatus('Не вдалось зберегти чернетку (перевір з\'єднання).');
+    }
+  }
+
+  function scheduleAutosave() {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(saveDraft, 2500);
+  }
+
+  document.getElementById('report-form').addEventListener('input', scheduleAutosave);
+  document.getElementById('report-form').addEventListener('change', scheduleAutosave);
+
+  const deleteDraftBtn = document.getElementById('delete-draft-btn');
+  if (deleteDraftBtn) {
+    deleteDraftBtn.addEventListener('click', async () => {
+      if (!confirm('Видалити цю чернетку без збереження?')) return;
+      deleteDraftBtn.disabled = true;
+      deleteDraftBtn.textContent = 'Видалення...';
+      try {
+        await supaDelete('daily_reports', `id=eq.${currentDraftId}`);
+        renderOperatorHome(user);
+      } catch (e) {
+        alert('Помилка видалення: ' + e.message);
+        deleteDraftBtn.disabled = false;
+        deleteDraftBtn.textContent = '🗑 Видалити чернетку';
+      }
+    });
+  }
+
   // Відправка форми — валідація і перехід на екран перевірки звіту
   // (запис у базу відбувається пізніше, з екрана перегляду).
   document.getElementById('report-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    clearTimeout(autosaveTimer);
     const submitBtn = document.getElementById('submit-btn');
     const errorBox = document.getElementById('error-box');
     errorBox.classList.add('hidden');
@@ -680,7 +867,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       const equipmentName = myEquipment.find(ue => ue.equipment.id === payload.equipment_id)?.equipment.name || '—';
       const objectName = objects.find(o => o.id === payload.object_id)?.name || '—';
 
-      renderReportPreview(user, payload, isEdit, existingReport, equipmentName, objectName);
+      renderReportPreview(user, payload, isEdit, existingReport, equipmentName, objectName, currentDraftId);
     } catch (err) {
       errorBox.textContent = err.message;
       errorBox.classList.remove('hidden');
@@ -696,7 +883,8 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
 // вже поданого звіту (визначає, робити supaUpdate чи supaInsert при підтвердженні).
 // equipmentName/objectName: назви для відображення (у payload лише id).
 
-function renderReportPreview(user, payload, isEdit, existingReport, equipmentName, objectName) {
+function renderReportPreview(user, payload, isEdit, existingReport, equipmentName, objectName, draftId = null) {
+  const hasDraftRow = !isEdit && draftId !== null; // рядок-чернетка вже існує в БД — потрібен UPDATE, а не новий INSERT
   const totalMotoHours = (payload.start_hours !== null && payload.end_hours !== null)
     ? Math.round((payload.end_hours - payload.start_hours) * 100) / 100
     : null;
@@ -733,7 +921,7 @@ function renderReportPreview(user, payload, isEdit, existingReport, equipmentNam
     </div>
   `;
 
-  const goBackToForm = () => renderOperatorForm(user, existingReport, payload);
+  const goBackToForm = () => renderOperatorForm(user, existingReport, payload, draftId);
   document.getElementById('back-to-form-preview').addEventListener('click', goBackToForm);
   document.getElementById('preview-edit-btn').addEventListener('click', goBackToForm);
 
@@ -765,6 +953,16 @@ function renderReportPreview(user, payload, isEdit, existingReport, equipmentNam
 
         dbPayload.status = 'Очікує відповідального';
         dbPayload.final_closed_at = null;
+
+        await supaUpdate('daily_reports', `id=eq.${reportId}`, dbPayload);
+      } else if (hasDraftRow) {
+        // Чернетка (продовжена вручну або створена автозбереженням) перетворюється
+        // на реально поданий звіт — той самий рядок, без запису в report_edit_log
+        // (це не коригування відхиленого звіту).
+        reportId = draftId;
+        dbPayload.status = 'Очікує відповідального';
+        dbPayload.final_closed_at = null;
+        dbPayload.submitted_at = new Date().toISOString();
 
         await supaUpdate('daily_reports', `id=eq.${reportId}`, dbPayload);
       } else {
