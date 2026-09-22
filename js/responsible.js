@@ -552,11 +552,16 @@ function reportDetailsHtml(r) {
     ? `<div class="hours">${r.start_hours} → ${r.end_hours} год (разом ${r.total_moto_hours})</div>`
     : '';
 
+  const kmLine = (r.start_km !== null && r.start_km !== undefined && r.end_km !== null && r.end_km !== undefined)
+    ? `<div class="hours">${r.start_km} → ${r.end_km} км (разом ${r.total_km})</div>`
+    : '';
+
   return `
     <div class="operator-name">${r.users?.full_name || '—'}</div>
     <div class="meta">${r.equipment?.name || '—'} · ${r.objects?.name || '—'}</div>
     ${customerLine}
     ${hoursLine}
+    ${kmLine}
     <div class="detail-row"><span class="label">Час роботи:</span> ${formatTimeUA(r.start_time)} – ${formatTimeUA(r.end_time)}, людиногодин: ${r.total_person_hours}</div>
     <div class="detail-row"><span class="label">Обід:</span> ${r.lunch_hours} год</div>
     ${travelLine}
@@ -574,7 +579,7 @@ function reportDetailsHtml(r) {
 
 // ---------- Мої підтвердження: звіти, що очікують дії ----------
 
-const REPORT_SELECT_FIELDS = 'id,work_date,status,equipment_id,customer_name,start_hours,end_hours,total_moto_hours,start_time,end_time,' +
+const REPORT_SELECT_FIELDS = 'id,work_date,status,equipment_id,customer_name,start_hours,end_hours,total_moto_hours,start_km,end_km,total_km,start_time,end_time,' +
   'lunch_hours,total_person_hours,travel_hours,travel_route,transported_people,transport_route,transport_hours,' +
   'downtime_hours,downtime_reason,fueling_liters,fueling_source,' +
   'has_breakdown,breakdown_description,repair_hours,start_hours_note,' +
@@ -617,7 +622,7 @@ async function renderPendingApprovals(user) {
       </div>
       ${reportDetailsHtml(r)}
       <div class="approval-actions">
-        <button class="btn-confirm" data-report-id="${r.id}" data-equipment-id="${r.equipment_id}" data-end-hours="${r.end_hours}">Підтвердити</button>
+        <button class="btn-confirm" data-report-id="${r.id}" data-equipment-id="${r.equipment_id}" data-end-hours="${r.end_hours}" data-end-km="${r.end_km}">Підтвердити</button>
         <button class="btn-reject" data-report-id="${r.id}">На коригування</button>
       </div>
       <div class="reject-box hidden" id="reject-box-${r.id}">
@@ -634,6 +639,7 @@ async function renderPendingApprovals(user) {
       btn.dataset.reportId,
       btn.dataset.equipmentId,
       parseFloat(btn.dataset.endHours),
+      parseFloat(btn.dataset.endKm),
       btn
     ));
   });
@@ -648,7 +654,7 @@ async function renderPendingApprovals(user) {
   });
 }
 
-async function confirmReport(user, reportId, equipmentId, endHours, btn) {
+async function confirmReport(user, reportId, equipmentId, endHours, endKm, btn) {
   btn.disabled = true;
   btn.textContent = 'Обробка...';
   try {
@@ -674,10 +680,11 @@ async function confirmReport(user, reportId, equipmentId, endHours, btn) {
       final_closed_at: new Date().toISOString()
     });
 
-    if (!isNaN(endHours)) {
-      await supaUpdate('equipment', `id=eq.${equipmentId}`, {
-        confirmed_hours: endHours
-      });
+    const equipmentUpdate = {};
+    if (!isNaN(endHours)) equipmentUpdate.confirmed_hours = endHours;
+    if (!isNaN(endKm)) equipmentUpdate.confirmed_km = endKm;
+    if (Object.keys(equipmentUpdate).length > 0) {
+      await supaUpdate('equipment', `id=eq.${equipmentId}`, equipmentUpdate);
     }
 
     document.getElementById(`card-${reportId}`).remove();
