@@ -727,8 +727,13 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     autosaveTimer = setTimeout(saveDraft, 2500);
   }
 
-  document.getElementById('report-form').addEventListener('input', scheduleAutosave);
-  document.getElementById('report-form').addEventListener('change', scheduleAutosave);
+  // Автозбереження вимкнене для редагування вже поданого (і відхиленого)
+  // звіту — це не чернетка, а реальний звіт, що чекає повторної відправки
+  // через звичайний флоу коригування, без проміжного статусу "Чернетка".
+  if (!isEdit) {
+    document.getElementById('report-form').addEventListener('input', scheduleAutosave);
+    document.getElementById('report-form').addEventListener('change', scheduleAutosave);
+  }
 
   const deleteDraftBtn = document.getElementById('delete-draft-btn');
   if (deleteDraftBtn) {
