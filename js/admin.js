@@ -93,6 +93,13 @@ function renderAdminHome(user) {
           <span class="sub">Техніка й оператори на об'єкті за період</span>
         </span>
       </button>
+      <button class="menu-btn" id="btn-operator-hours">
+        <span class="emoji">🕒</span>
+        <span>
+          Години оператора
+          <span class="sub">Підтверджені години оператора / водія, відомість у Telegram</span>
+        </span>
+      </button>
     </div>
   `;
   document.getElementById('btn-pending').addEventListener('click', () => renderPendingApprovals(user));
@@ -106,6 +113,70 @@ function renderAdminHome(user) {
   document.getElementById('btn-closed-reports').addEventListener('click', () => renderAdminClosedReports(user));
   document.getElementById('btn-wialon-check').addEventListener('click', () => renderWialonCheck(user));
   document.getElementById('btn-object-report').addEventListener('click', () => renderObjectReport(user));
+  document.getElementById('btn-operator-hours').addEventListener('click', () => renderOperatorHoursPick(user));
+}
+
+// ---------- Години оператора: вибір оператора / водія ----------
+// Далі — спільний екран renderHoursScreen() з operator.js (той самий, що
+// "Мої години" в оператора). Файл Excel приходить адміну (viewer), а не
+// оператору; у export_files: user_id = адмін, subject_user_id = оператор.
+
+async function renderOperatorHoursPick(user) {
+  app.innerHTML = `
+    ${topbarHtml('Години оператора', roleSubtitle(user))}
+    <div class="wrap" style="padding-top:14px">
+      <div class="back-link" id="back-to-menu-oh" style="margin:0 0 14px">← Назад до меню</div>
+      <div class="hint-inline" style="margin:0 0 10px">Оберіть оператора або водія.</div>
+      <div id="oh-list" class="msg">Завантаження...</div>
+    </div>
+  `;
+  document.getElementById('back-to-menu-oh').addEventListener('click', () => renderAdminHome(user));
+
+  let people;
+  try {
+    people = await supaGet(
+      'users',
+      `role=in.(Оператор,Водій)&select=id,full_name,role,status&order=full_name.asc`
+    );
+  } catch (e) {
+    document.getElementById('oh-list').textContent = 'Помилка завантаження: ' + e.message;
+    return;
+  }
+
+  const listEl = document.getElementById('oh-list');
+  if (!people || people.length === 0) {
+    listEl.textContent = 'Операторів і водіїв ще немає.';
+    return;
+  }
+
+  // Активні — зверху, неактивні (звільнені) — внизу з позначкою
+  const active = people.filter(p => p.status === 'Активний');
+  const inactive = people.filter(p => p.status !== 'Активний');
+
+  const btnHtml = p => `
+    <button class="menu-btn" data-oh-id="${p.id}" style="padding:12px 14px${p.status !== 'Активний' ? ';opacity:0.6' : ''}">
+      <span class="emoji">${p.role === 'Водій' ? '🚌' : '👷'}</span>
+      <span>
+        ${escHtml(p.full_name)}
+        <span class="sub">${escHtml(p.role)}${p.status !== 'Активний' ? ' · неактивний' : ''}</span>
+      </span>
+    </button>
+  `;
+
+  listEl.className = '';
+  listEl.innerHTML = active.map(btnHtml).join('') +
+    (inactive.length ? `<div class="hint-inline" style="margin:14px 0 8px">Неактивні:</div>` + inactive.map(btnHtml).join('') : '');
+
+  listEl.querySelectorAll('[data-oh-id]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const subject = people.find(p => p.id === btn.dataset.ohId);
+      renderHoursScreen({
+        viewer: user,
+        subject,
+        onBack: () => renderOperatorHoursPick(user)
+      });
+    });
+  });
 }
 
 // ---------- Додати нового користувача ----------
