@@ -168,7 +168,9 @@ async function renderAddUser(user) {
   const equipmentSection = document.getElementById('equipment-section');
 
   function toggleEquipmentSection() {
-    equipmentSection.classList.toggle('hidden', roleSelect.value !== 'Оператор');
+    // Водій працює як Оператор, тож теж отримує закріплену техніку
+    const worksAsOperator = roleSelect.value === 'Оператор' || roleSelect.value === 'Водій';
+    equipmentSection.classList.toggle('hidden', !worksAsOperator);
   }
   roleSelect.addEventListener('change', toggleEquipmentSection);
   toggleEquipmentSection();
