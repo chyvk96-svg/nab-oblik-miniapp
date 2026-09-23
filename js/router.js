@@ -32,7 +32,9 @@ async function main() {
     return;
   }
 
-  if (currentUser.role === 'Оператор') {
+  // "Водій" — не окрема роль, а лише позначка в списку користувачів:
+  // у Mini App працює так само, як Оператор (те саме меню і форма звіту).
+  if (currentUser.role === 'Оператор' || currentUser.role === 'Водій') {
     renderOperatorHome(currentUser);
   } else if (currentUser.role === 'Відповідальний') {
     renderResponsibleHome(currentUser);
