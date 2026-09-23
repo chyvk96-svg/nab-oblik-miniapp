@@ -450,6 +450,16 @@ function wirePeriodPicker(prefix, onShow) {
     onShow(fromEl.value, toEl.value);
   });
 
+  // Автооновлення при зміні дати вручну (без натискання "Показати"),
+  // щоб на екрані ніколи не лишався результат за інший період
+  const onDateChange = () => {
+    if (fromEl.value && toEl.value && fromEl.value <= toEl.value) {
+      onShow(fromEl.value, toEl.value);
+    }
+  };
+  fromEl.addEventListener('change', onDateChange);
+  toEl.addEventListener('change', onDateChange);
+
   // Початковий період — тиждень
   const p = quickPeriod('week');
   fromEl.value = p.from;
@@ -481,8 +491,13 @@ async function renderWialonCheck(user) {
   wirePeriodPicker('wc', (from, to) => loadWialonSummary(from, to));
 }
 
+// Лічильник запитів: якщо користувач швидко змінює період, показуємо
+// лише результат останнього запиту (попередні відповіді ігноруються)
+let wialonLoadSeq = 0;
+
 async function loadWialonSummary(from, to) {
   const listEl = document.getElementById('wialon-list');
+  const seq = ++wialonLoadSeq;
   listEl.className = 'msg';
   listEl.textContent = 'Завантаження...';
 
@@ -490,9 +505,11 @@ async function loadWialonSummary(from, to) {
   try {
     rows = await supaRpc('wialon_equipment_summary', { p_from: from, p_to: to });
   } catch (e) {
+    if (seq !== wialonLoadSeq) return;
     listEl.textContent = 'Помилка завантаження: ' + e.message;
     return;
   }
+  if (seq !== wialonLoadSeq) return;
 
   if (!rows || rows.length === 0) {
     listEl.textContent = `За ${formatDateUA(from)} – ${formatDateUA(to)} немає ні звітів, ні роботи техніки у Wialon.`;
@@ -502,12 +519,26 @@ async function loadWialonSummary(from, to) {
   listEl.className = '';
   listEl.innerHTML = `
     <div class="meta" style="margin:0 0 8px">Період: ${formatDateUA(from)} – ${formatDateUA(to)} · техніки: ${rows.length}</div>
+    <button type="button" class="btn-add-top" id="wc-excel-btn">⬇ Завантажити Excel</button>
     ${rows.map(r => wialonSummaryCardHtml(r)).join('')}
   `;
 
   listEl.querySelectorAll('[data-wc-days]').forEach(btn => {
     btn.addEventListener('click', () => toggleWialonDaily(btn, from, to));
   });
+
+  const excelBtn = document.getElementById('wc-excel-btn');
+  excelBtn.addEventListener('click', () => exportWialonExcel(excelBtn, rows, from, to));
+}
+
+// Статус техніки для таблиці (та сама логіка, що й мітка на картці)
+function wialonRowStatus(r) {
+  if (!r.wialon_unit_id) return 'без Wialon';
+  const motoBad = r.moto_hours_diff !== null && Math.abs(Number(r.moto_hours_diff)) > WIALON_MOTO_THRESHOLD;
+  const fuelBad = r.fueling_diff !== null && Math.abs(Number(r.fueling_diff)) > WIALON_FUEL_THRESHOLD;
+  const drained = Number(r.fuel_drained_wialon) > 0;
+  const noReportDays = Number(r.days_work_without_report) > 0;
+  return (motoBad || fuelBad || drained || noReportDays) ? 'перевірити' : 'OK';
 }
 
 function wialonSummaryCardHtml(r) {
@@ -676,8 +707,11 @@ async function renderObjectReport(user) {
   wirePeriodPicker('or', show);
 }
 
+let objectLoadSeq = 0;
+
 async function loadObjectReport(objectId, objectName, from, to) {
   const resEl = document.getElementById('objrep-result');
+  const seq = ++objectLoadSeq;
   resEl.className = 'msg';
   resEl.textContent = 'Завантаження...';
 
@@ -685,9 +719,11 @@ async function loadObjectReport(objectId, objectName, from, to) {
   try {
     rows = await supaRpc('object_report', { p_object_id: objectId, p_from: from, p_to: to });
   } catch (e) {
+    if (seq !== objectLoadSeq) return;
     resEl.textContent = 'Помилка завантаження: ' + e.message;
     return;
   }
+  if (seq !== objectLoadSeq) return;
 
   if (!rows || rows.length === 0) {
     resEl.textContent = `По об'єкту "${objectName}" за ${formatDateUA(from)} – ${formatDateUA(to)} звітів немає.`;
@@ -714,6 +750,8 @@ async function loadObjectReport(objectId, objectName, from, to) {
       <div class="detail-row">Заправка: <b>${fmtNum(sum('fueling_liters'), 1)}</b> л</div>
     </div>
 
+    <button type="button" class="btn-add-top" id="or-excel-btn" style="margin-top:6px">⬇ Завантажити Excel</button>
+
     <div class="meta" style="margin:14px 0 8px">По техніці й операторах:</div>
 
     ${rows.map(r => `
@@ -732,4 +770,269 @@ async function loadObjectReport(objectId, objectName, from, to) {
       </div>
     `).join('')}
   `;
+
+  const excelBtn = document.getElementById('or-excel-btn');
+  excelBtn.addEventListener('click', () => exportObjectExcel(excelBtn, objectId, objectName, rows, from, to));
+}
+
+// ======================================================
+// ВИВАНТАЖЕННЯ В EXCEL
+// Файл .xlsx формується прямо в Mini App (бібліотека SheetJS, вантажиться
+// лише при першому натисканні), кладеться в Supabase Storage (сховище
+// "exports", публічне на читання, назва з випадковим ідентифікатором),
+// після чого Telegram показує стандартне вікно "Завантажити файл"
+// (Telegram.WebApp.downloadFile, Telegram 8.0+). Для старих версій —
+// відкривається пряме посилання на файл.
+// ======================================================
+
+const XLSX_LIB_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+let xlsxLibPromise = null;
+
+function loadXlsxLib() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (xlsxLibPromise) return xlsxLibPromise;
+  xlsxLibPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = XLSX_LIB_URL;
+    s.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error('бібліотека Excel не ініціалізувалась'));
+    s.onerror = () => {
+      xlsxLibPromise = null;
+      reject(new Error('не вдалося завантажити бібліотеку Excel (перевір інтернет)'));
+    };
+    document.head.appendChild(s);
+  });
+  return xlsxLibPromise;
+}
+
+// Число для Excel: справжнє число (не текст), порожнє — порожня клітинка
+function xNum(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return isNaN(n) ? null : n;
+}
+
+// Аркуш з масиву рядків-об'єктів; ширина колонок — за найдовшим значенням
+function makeSheet(XLSX, rowsArr, headers) {
+  const data = [headers.map(h => h.title)].concat(
+    rowsArr.map(r => headers.map(h => {
+      const v = h.get(r);
+      return v === undefined ? null : v;
+    }))
+  );
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws['!cols'] = headers.map((h, i) => {
+    const maxLen = data.reduce((m, row) => Math.max(m, String(row[i] ?? '').length), 0);
+    return { wch: Math.min(Math.max(maxLen + 2, 8), 50) };
+  });
+  return ws;
+}
+
+function randomId() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+
+// Завантажує книгу в Supabase Storage і віддає користувачу
+async function deliverWorkbook(XLSX, wb, fileName) {
+  const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const path = `${randomId()}/${fileName}`;
+
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/exports/${path}`, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': XLSX_MIME,
+      'x-upsert': 'false'
+    },
+    body: new Blob([buffer], { type: XLSX_MIME })
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error('не вдалося зберегти файл у сховище: ' + errText);
+  }
+
+  const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/exports/${path}`;
+
+  if (tg && typeof tg.downloadFile === 'function' && tg.isVersionAtLeast && tg.isVersionAtLeast('8.0')) {
+    tg.downloadFile({ url: publicUrl, file_name: fileName });
+  } else if (tg && typeof tg.openLink === 'function') {
+    tg.openLink(publicUrl);
+  } else {
+    window.open(publicUrl, '_blank');
+  }
+}
+
+// Обгортка для кнопки: стан "Формування...", помилки — alert
+async function runExport(btn, job) {
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Формування файлу...';
+  try {
+    await job();
+    btn.textContent = '✅ Файл готовий';
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2500);
+  } catch (e) {
+    alert('Помилка вивантаження: ' + e.message);
+    btn.textContent = original;
+    btn.disabled = false;
+  }
+}
+
+// ---------- Excel: звірка з Wialon ----------
+// Аркуш "Підсумок" — те саме, що картки на екрані; аркуш "По днях" —
+// розбивка по днях для кожної техніки.
+function exportWialonExcel(btn, rows, from, to) {
+  runExport(btn, async () => {
+    const XLSX = await loadXlsxLib();
+
+    const summarySheet = makeSheet(XLSX, rows, [
+      { title: 'Техніка', get: r => r.equipment_name },
+      { title: 'ID у Wialon', get: r => r.wialon_unit_id || '' },
+      { title: 'Статус', get: r => wialonRowStatus(r) },
+      { title: 'Звітів', get: r => xNum(r.reports_count) },
+      { title: 'Днів зі звітами', get: r => xNum(r.report_days) },
+      { title: 'Мотогодини: звіти', get: r => xNum(r.moto_hours_reports) },
+      { title: 'Мотогодини: Wialon', get: r => xNum(r.moto_hours_wialon) },
+      { title: 'Мотогодини: різниця (звіти − Wialon)', get: r => xNum(r.moto_hours_diff) },
+      { title: 'Заправка, л: звіти', get: r => xNum(r.fueling_reports) },
+      { title: 'Заправка, л: Wialon', get: r => xNum(r.fueling_wialon) },
+      { title: 'Заправка, л: різниця', get: r => xNum(r.fueling_diff) },
+      { title: 'Злито, л (Wialon)', get: r => xNum(r.fuel_drained_wialon) },
+      { title: 'Пробіг, км: звіти', get: r => xNum(r.km_reports) },
+      { title: 'Пробіг, км: Wialon', get: r => xNum(r.km_wialon) },
+      { title: 'Днів з даними Wialon', get: r => xNum(r.wialon_days_collected) },
+      { title: 'Днів роботи без звіту', get: r => xNum(r.days_work_without_report) }
+    ]);
+
+    // Розбивка по днях — окремий запит по кожній техніці
+    const dailyRows = [];
+    for (const r of rows) {
+      const days = await supaRpc('wialon_equipment_daily', { p_equipment_id: r.equipment_id, p_from: from, p_to: to });
+      (days || []).forEach(d => dailyRows.push({ equipment_name: r.equipment_name, ...d }));
+    }
+
+    const dailySheet = makeSheet(XLSX, dailyRows, [
+      { title: 'Техніка', get: d => d.equipment_name },
+      { title: 'Дата', get: d => formatDateUA(d.work_date) },
+      { title: 'Звітів', get: d => xNum(d.reports_count) },
+      { title: "Об'єкти", get: d => d.objects || '' },
+      { title: 'Мотогодини: звіти', get: d => xNum(d.moto_hours_reports) },
+      { title: 'Мотогодини: Wialon', get: d => xNum(d.moto_hours_wialon) },
+      { title: 'Мотогодини: різниця', get: d => xNum(d.moto_hours_diff) },
+      { title: 'Заправка, л: звіти', get: d => xNum(d.fueling_reports) },
+      { title: 'Заправка, л: Wialon', get: d => xNum(d.fueling_wialon) },
+      { title: 'Злито, л (Wialon)', get: d => xNum(d.fuel_drained_wialon) },
+      { title: 'Пробіг, км: звіти', get: d => xNum(d.km_reports) },
+      { title: 'Пробіг, км: Wialon', get: d => xNum(d.km_wialon) },
+      { title: 'Дані Wialon', get: d => d.wialon_status || 'не зібрано' }
+    ]);
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, summarySheet, 'Підсумок');
+    XLSX.utils.book_append_sheet(wb, dailySheet, 'По днях');
+
+    await deliverWorkbook(XLSX, wb, `Zvirka_Wialon_${from}_${to}.xlsx`);
+  });
+}
+
+// ---------- Excel: звіт по об'єкту ----------
+// Аркуші: "Разом" (підсумок об'єкта), "Техніка й оператори" (те саме, що
+// картки на екрані), "Звіти" — кожен звіт окремим рядком.
+function exportObjectExcel(btn, objectId, objectName, rows, from, to) {
+  runExport(btn, async () => {
+    const XLSX = await loadXlsxLib();
+
+    const sum = (key) => rows.reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
+    const kmRows = rows.filter(r => r.km !== null);
+
+    const totalSheet = makeSheet(XLSX, [{}], [
+      { title: "Об'єкт", get: () => objectName },
+      { title: 'Період з', get: () => formatDateUA(from) },
+      { title: 'Період по', get: () => formatDateUA(to) },
+      { title: 'Звітів', get: () => sum('reports_count') },
+      { title: 'Підтверджено', get: () => sum('confirmed_count') },
+      { title: 'Техніки', get: () => new Set(rows.map(r => r.equipment_id)).size },
+      { title: 'Операторів', get: () => new Set(rows.map(r => r.operator_id)).size },
+      { title: 'Мотогодини', get: () => sum('moto_hours') },
+      { title: 'Пробіг, км', get: () => kmRows.length ? sum('km') : null },
+      { title: 'Людиногодини', get: () => sum('person_hours') },
+      { title: 'Перебазування, год', get: () => sum('travel_hours') },
+      { title: 'Перевезення людей, год', get: () => sum('transport_hours') },
+      { title: 'Простій, год', get: () => sum('downtime_hours') },
+      { title: 'Ремонт, год', get: () => sum('repair_hours') },
+      { title: 'Поломок', get: () => sum('breakdowns_count') },
+      { title: 'Заправка, л', get: () => sum('fueling_liters') }
+    ]);
+
+    const groupSheet = makeSheet(XLSX, rows, [
+      { title: 'Техніка', get: r => r.equipment_name || '' },
+      { title: 'Оператор', get: r => r.operator_name || '' },
+      { title: 'Перша дата', get: r => formatDateUA(r.first_date) },
+      { title: 'Остання дата', get: r => formatDateUA(r.last_date) },
+      { title: 'Днів', get: r => xNum(r.work_days) },
+      { title: 'Звітів', get: r => xNum(r.reports_count) },
+      { title: 'Підтверджено', get: r => xNum(r.confirmed_count) },
+      { title: 'Мотогодини', get: r => xNum(r.moto_hours) },
+      { title: 'Пробіг, км', get: r => xNum(r.km) },
+      { title: 'Людиногодини', get: r => xNum(r.person_hours) },
+      { title: 'Перебазування, год', get: r => xNum(r.travel_hours) },
+      { title: 'Перевезення людей, год', get: r => xNum(r.transport_hours) },
+      { title: 'Простій, год', get: r => xNum(r.downtime_hours) },
+      { title: 'Ремонт, год', get: r => xNum(r.repair_hours) },
+      { title: 'Поломок', get: r => xNum(r.breakdowns_count) },
+      { title: 'Заправка, л', get: r => xNum(r.fueling_liters) }
+    ]);
+
+    // Усі звіти об'єкта за період (крім чернеток), кожен окремим рядком
+    const reports = await supaGet(
+      'daily_reports',
+      `object_id=eq.${objectId}&work_date=gte.${from}&work_date=lte.${to}&status=neq.Чернетка` +
+      `&select=id,work_date,status,customer_name,equipment(name),users!daily_reports_operator_id_fkey(full_name),` +
+      `start_hours,end_hours,total_moto_hours,start_km,end_km,total_km,start_time,end_time,lunch_hours,total_person_hours,` +
+      `travel_hours,travel_route,transport_hours,transport_route,downtime_hours,downtime_reason,fueling_liters,fueling_source,` +
+      `has_breakdown,breakdown_description,repair_hours,operator_note` +
+      `&order=work_date.asc`
+    );
+
+    const reportsSheet = makeSheet(XLSX, reports || [], [
+      { title: 'Дата', get: r => formatDateUA(r.work_date) },
+      { title: 'Звіт', get: r => r.id },
+      { title: 'Статус', get: r => r.status },
+      { title: 'Техніка', get: r => r.equipment?.name || '' },
+      { title: 'Оператор', get: r => r.users?.full_name || '' },
+      { title: 'Замовник', get: r => r.customer_name || '' },
+      { title: 'М/г початок', get: r => xNum(r.start_hours) },
+      { title: 'М/г кінець', get: r => xNum(r.end_hours) },
+      { title: 'Мотогодини', get: r => xNum(r.total_moto_hours) },
+      { title: 'Км початок', get: r => xNum(r.start_km) },
+      { title: 'Км кінець', get: r => xNum(r.end_km) },
+      { title: 'Пробіг, км', get: r => xNum(r.total_km) },
+      { title: 'Початок роботи', get: r => formatTimeUA(r.start_time) },
+      { title: 'Кінець роботи', get: r => formatTimeUA(r.end_time) },
+      { title: 'Обід, год', get: r => xNum(r.lunch_hours) },
+      { title: 'Людиногодини', get: r => xNum(r.total_person_hours) },
+      { title: 'Перебазування, год', get: r => xNum(r.travel_hours) },
+      { title: 'Маршрут перебазування', get: r => r.travel_route || '' },
+      { title: 'Перевезення людей, год', get: r => xNum(r.transport_hours) },
+      { title: 'Маршрут перевезення', get: r => r.transport_route || '' },
+      { title: 'Простій, год', get: r => xNum(r.downtime_hours) },
+      { title: 'Причина простою', get: r => r.downtime_reason || '' },
+      { title: 'Заправка, л', get: r => xNum(r.fueling_liters) },
+      { title: 'Звідки заправка', get: r => r.fueling_source || '' },
+      { title: 'Поломка', get: r => r.has_breakdown ? 'так' : '' },
+      { title: 'Опис поломки', get: r => r.breakdown_description || '' },
+      { title: 'Ремонт, год', get: r => xNum(r.repair_hours) },
+      { title: 'Примітка', get: r => r.operator_note || '' }
+    ]);
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, totalSheet, 'Разом');
+    XLSX.utils.book_append_sheet(wb, groupSheet, 'Техніка й оператори');
+    XLSX.utils.book_append_sheet(wb, reportsSheet, 'Звіти');
+
+    await deliverWorkbook(XLSX, wb, `Zvit_obiekt_${objectId}_${from}_${to}.xlsx`);
+  });
 }
