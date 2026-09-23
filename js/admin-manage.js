@@ -102,6 +102,9 @@ async function renderEditUser(user, targetUserId) {
     return;
   }
 
+  // Водій — лише позначка, у Mini App працює як Оператор (має закріплену техніку)
+  const worksAsOperator = targetUser.role === 'Оператор' || targetUser.role === 'Водій';
+
   bodyEl.className = '';
   bodyEl.innerHTML = `
     <form id="edit-user-form">
@@ -129,12 +132,12 @@ async function renderEditUser(user, targetUserId) {
       <button type="submit" id="edit-user-submit-btn">Зберегти зміни</button>
       <div class="error-text hidden" id="edit-user-error-box"></div>
     </form>
-    ${targetUser.role === 'Оператор' ? `
+    ${worksAsOperator ? `
       <button type="button" class="btn-add-top" id="btn-go-user-equipment" style="margin-top:18px">🚜 Керувати технікою цього оператора</button>
     ` : ''}
   `;
 
-  if (targetUser.role === 'Оператор') {
+  if (worksAsOperator) {
     document.getElementById('btn-go-user-equipment').addEventListener('click', () => renderUserEquipment(user, targetUserId));
   }
 
