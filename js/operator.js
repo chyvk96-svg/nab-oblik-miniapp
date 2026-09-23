@@ -212,6 +212,9 @@ async function fetchLatestRejectionComments(reportIds) {
 // Чернетки не показуються.
 // Кнопка "Надіслати в Telegram": .xlsx → Storage "exports" → рядок у
 // export_files → Database Webhook → Make → файл у чат з ботом.
+// Той самий екран використовує адміністратор ("Години оператора" в admin.js):
+// renderHoursScreen({ viewer, subject, onBack }) — viewer (хто дивиться)
+// отримує файл у бот, subject — чиї години (export_files.subject_user_id).
 // Використовує спільні з admin.js: isoDateLocal, fmtNum, loadXlsxLib, xNum,
 // XLSX_MIME (admin.js підключений на сторінці для всіх ролей).
 
@@ -247,11 +250,18 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
-async function renderMyHours(user) {
+function renderMyHours(user) {
+  renderHoursScreen({ viewer: user, subject: user, onBack: () => renderOperatorHome(user) });
+}
+
+async function renderHoursScreen({ viewer, subject, onBack }) {
+  const isOwn = viewer.id === subject.id;
+  const title = isOwn ? 'Мої години' : 'Години оператора';
+  const subtitle = isOwn ? roleSubtitle(viewer) : `${escHtml(subject.role || 'Оператор')}: ${escHtml(subject.full_name)}`;
   app.innerHTML = `
-    ${topbarHtml('Мої години', roleSubtitle(user))}
+    ${topbarHtml(title, subtitle)}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-menu" style="margin:0 0 4px">← Назад до меню</div>
+      <div class="back-link" id="back-to-menu" style="margin:0 0 4px">← ${isOwn ? 'Назад до меню' : 'Назад до списку'}</div>
       <div class="section" style="padding-bottom:12px">
         <div style="display:flex;gap:6px">
           <button type="button" class="btn-reject" style="padding:8px 4px" data-mh-quick="this">Цей місяць</button>
@@ -271,7 +281,7 @@ async function renderMyHours(user) {
       <div id="mh-result" class="msg">Завантаження...</div>
     </div>
   `;
-  document.getElementById('back-to-menu').addEventListener('click', () => renderOperatorHome(user));
+  document.getElementById('back-to-menu').addEventListener('click', onBack);
 
   const fromEl = document.getElementById('mh-from');
   const toEl = document.getElementById('mh-to');
@@ -279,7 +289,7 @@ async function renderMyHours(user) {
   const show = (from, to) => {
     fromEl.value = from;
     toEl.value = to;
-    loadMyHours(user, from, to);
+    loadMyHours(viewer, subject, from, to);
   };
 
   document.querySelectorAll('[data-mh-quick]').forEach(btn => {
@@ -296,7 +306,7 @@ async function renderMyHours(user) {
       document.getElementById('mh-result').textContent = 'Дата "з" не може бути пізнішою за "по".';
       return;
     }
-    loadMyHours(user, fromEl.value, toEl.value);
+    loadMyHours(viewer, subject, fromEl.value, toEl.value);
   };
   fromEl.addEventListener('change', onDateChange);
   toEl.addEventListener('change', onDateChange);
@@ -305,7 +315,7 @@ async function renderMyHours(user) {
   show(p.from, p.to);
 }
 
-async function loadMyHours(user, from, to) {
+async function loadMyHours(viewer, subject, from, to) {
   const seq = ++hoursLoadSeq;
   const resultEl = document.getElementById('mh-result');
   if (!resultEl) return;
@@ -316,7 +326,7 @@ async function loadMyHours(user, from, to) {
   try {
     reports = await supaGet(
       'daily_reports',
-      `operator_id=eq.${user.id}&work_date=gte.${from}&work_date=lte.${to}&status=neq.Чернетка` +
+      `operator_id=eq.${subject.id}&work_date=gte.${from}&work_date=lte.${to}&status=neq.Чернетка` +
       `&select=id,work_date,status,start_time,total_person_hours,travel_hours,transport_hours,equipment(name),objects(name)` +
       `&order=work_date.asc,start_time.asc`
     );
@@ -419,12 +429,14 @@ async function loadMyHours(user, from, to) {
     ${pendingHtml}
     <button type="button" class="btn-add-top" id="mh-send-btn" style="margin-top:18px">📥 Надіслати в Telegram</button>
     <div class="hint-inline" id="mh-send-hint" style="text-align:center;margin-bottom:10px">
-      Файл Excel прийде в чат з ботом — там зберігається історія ваших відомостей.
+      ${viewer.id === subject.id
+        ? 'Файл Excel прийде в чат з ботом — там зберігається історія ваших відомостей.'
+        : 'Файл Excel прийде вам (не оператору) у чат з ботом.'}
     </div>
   `;
 
   const sendBtn = document.getElementById('mh-send-btn');
-  sendBtn.addEventListener('click', () => sendHoursToTelegram(sendBtn, user, from, to, confirmed, pending, totals));
+  sendBtn.addEventListener('click', () => sendHoursToTelegram(sendBtn, viewer, subject, from, to, confirmed, pending, totals));
 }
 
 // ---------- Відомість годин: Excel → Storage → export_files → бот ----------
@@ -499,7 +511,7 @@ function hoursCaption(user, from, to, pending, totals) {
   return lines.join('\n');
 }
 
-async function sendHoursToTelegram(btn, user, from, to, confirmed, pending, totals) {
+async function sendHoursToTelegram(btn, viewer, subject, from, to, confirmed, pending, totals) {
   const original = btn.textContent;
   const hint = document.getElementById('mh-send-hint');
   btn.disabled = true;
@@ -507,10 +519,10 @@ async function sendHoursToTelegram(btn, user, from, to, confirmed, pending, tota
 
   try {
     const XLSX = await loadXlsxLib();
-    const wb = buildHoursWorkbook(XLSX, user, from, to, confirmed, pending, totals);
+    const wb = buildHoursWorkbook(XLSX, subject, from, to, confirmed, pending, totals);
     const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
 
-    const fileName = `Hodyny_${user.id}_${from}_${to}.xlsx`;
+    const fileName = `Hodyny_${subject.id}_${from}_${to}.xlsx`;
     const path = `${exportUuid()}/${fileName}`;
 
     btn.textContent = 'Надсилання...';
@@ -530,13 +542,14 @@ async function sendHoursToTelegram(btn, user, from, to, confirmed, pending, tota
     }
 
     await supaInsert('export_files', {
-      user_id: user.id,
+      user_id: viewer.id,             // хто вивантажує — йому бот надішле файл
+      subject_user_id: subject.id,    // чиї години
       export_type: 'Години оператора',
       period_from: from,
       period_to: to,
       file_path: path,
       file_name: fileName,
-      caption: hoursCaption(user, from, to, pending, totals)
+      caption: hoursCaption(subject, from, to, pending, totals)
     });
 
     btn.textContent = '✅ Надіслано в чат з ботом';
