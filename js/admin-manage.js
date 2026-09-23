@@ -188,6 +188,28 @@ async function renderEditUser(user, targetUserId) {
 // B. ТЕХНІКА: список, додавання, редагування, деактивація/активація
 // ======================================================
 
+// ID юніта Wialon — лише цифри (наприклад 23952736). Порожнє = техніка не
+// прив'язана до Wialon і в автоматичній звірці не бере участі.
+// Повертає { value, error }.
+function parseWialonUnitId(raw) {
+  const v = (raw || '').trim();
+  if (v === '') return { value: null, error: null };
+  if (!/^\d+$/.test(v)) {
+    return { value: null, error: 'ID у Wialon має складатися лише з цифр (наприклад 23952736).' };
+  }
+  return { value: v, error: null };
+}
+
+// Зрозуміле повідомлення, якщо цей ID Wialon уже прив'язаний до іншої техніки
+// (у БД стоїть унікальний індекс idx_equipment_wialon_unit_id).
+function equipmentSaveErrorText(err) {
+  const msg = (err && err.message) || '';
+  if (msg.includes('idx_equipment_wialon_unit_id') || msg.includes('duplicate key')) {
+    return 'Цей ID у Wialon уже прив\'язаний до іншої техніки. Перевір номер.';
+  }
+  return msg;
+}
+
 async function renderEquipmentList(user) {
   app.innerHTML = `
     ${topbarHtml('Техніка', roleSubtitle(user))}
@@ -204,7 +226,7 @@ async function renderEquipmentList(user) {
 
   let equipmentList;
   try {
-    equipmentList = await supaGet('equipment', `select=id,name,brand_model,reg_number,status,tracks_moto_hours,tracks_odometer&order=status.asc,name.asc`);
+    equipmentList = await supaGet('equipment', `select=id,name,brand_model,reg_number,status,tracks_moto_hours,tracks_odometer,wialon_unit_id&order=status.asc,name.asc`);
   } catch (e) {
     listEl.textContent = 'Помилка завантаження: ' + e.message;
     return;
@@ -223,6 +245,7 @@ async function renderEquipmentList(user) {
         <span class="status-chip ${eq.status === 'Активна' ? 'status-final' : 'status-corr'}">${eq.status}</span>
       </div>
       <div class="meta">${eq.brand_model || '—'} · номер: ${eq.reg_number || '—'}${eq.tracks_moto_hours === false ? ' · без мотогодин' : ''}${eq.tracks_odometer ? ' · спідометр' : ''}</div>
+      <div class="meta">Wialon: ${eq.wialon_unit_id ? eq.wialon_unit_id : 'не прив\'язано'}</div>
       <div class="item-actions">
         <button type="button" class="btn-confirm" data-edit-eq="${eq.id}">Редагувати</button>
         <button type="button" class="btn-reject" data-toggle-eq="${eq.id}" data-current-status="${eq.status}">
@@ -271,6 +294,10 @@ async function renderAddEquipment(user) {
 
           <label>Держ./інвентарний номер</label>
           <input type="text" id="new_eq_reg_number" placeholder="Необов'язково">
+
+          <label>ID у Wialon</label>
+          <input type="text" id="new_eq_wialon_unit_id" inputmode="numeric" placeholder="Необов'язково, напр. 23952736">
+          <div class="hint-inline">Номер цієї техніки в системі Wialon (GPS-трекер) — потрібен для автоматичної звірки звітів. Залиш порожнім, якщо трекера немає.</div>
 
           <div class="checkbox-row">
             <input type="checkbox" id="new_eq_tracks_moto_hours" checked>
@@ -334,9 +361,16 @@ async function renderAddEquipment(user) {
     const tracksOdometer = tracksOdometerCheckbox.checked;
     const confirmedKm = tracksOdometer ? (parseFloat(confirmedKmInput.value) || 0) : null;
     const note = document.getElementById('new_eq_note').value.trim();
+    const wialon = parseWialonUnitId(document.getElementById('new_eq_wialon_unit_id').value);
 
     if (!name) {
       errorBox.textContent = "Вкажи назву техніки.";
+      errorBox.classList.remove('hidden');
+      return;
+    }
+
+    if (wialon.error) {
+      errorBox.textContent = wialon.error;
       errorBox.classList.remove('hidden');
       return;
     }
@@ -356,6 +390,7 @@ async function renderAddEquipment(user) {
         confirmed_hours: confirmedHours,
         tracks_odometer: tracksOdometer,
         confirmed_km: confirmedKm,
+        wialon_unit_id: wialon.value,
         note: note || null
       });
 
@@ -370,7 +405,7 @@ async function renderAddEquipment(user) {
       `;
       document.getElementById('back-eq-list-btn').addEventListener('click', () => renderEquipmentList(user));
     } catch (err) {
-      errorBox.textContent = err.message;
+      errorBox.textContent = equipmentSaveErrorText(err);
       errorBox.classList.remove('hidden');
       submitBtn.disabled = false;
       submitBtn.textContent = "Додати техніку";
@@ -392,7 +427,7 @@ async function renderEditEquipment(user, equipmentId) {
 
   let eq;
   try {
-    const rows = await supaGet('equipment', `id=eq.${equipmentId}&select=id,name,brand_model,reg_number,note,status,tracks_moto_hours,tracks_odometer`);
+    const rows = await supaGet('equipment', `id=eq.${equipmentId}&select=id,name,brand_model,reg_number,note,status,tracks_moto_hours,tracks_odometer,wialon_unit_id`);
     eq = rows && rows[0];
   } catch (e) {
     bodyEl.textContent = 'Помилка завантаження: ' + e.message;
@@ -418,6 +453,10 @@ async function renderEditEquipment(user, equipmentId) {
 
         <label>Держ./інвентарний номер</label>
         <input type="text" id="edit_eq_reg_number" value="${eq.reg_number || ''}">
+
+        <label>ID у Wialon</label>
+        <input type="text" id="edit_eq_wialon_unit_id" inputmode="numeric" value="${eq.wialon_unit_id || ''}" placeholder="Необов'язково, напр. 23952736">
+        <div class="hint-inline">Номер цієї техніки в системі Wialon (GPS-трекер) — потрібен для автоматичної звірки звітів. Залиш порожнім, якщо трекера немає.</div>
 
         <div class="checkbox-row">
           <input type="checkbox" id="edit_eq_tracks_moto_hours" ${eq.tracks_moto_hours !== false ? 'checked' : ''}>
@@ -454,9 +493,16 @@ async function renderEditEquipment(user, equipmentId) {
     const tracksMotoHours = document.getElementById('edit_eq_tracks_moto_hours').checked;
     const tracksOdometer = document.getElementById('edit_eq_tracks_odometer').checked;
     const note = document.getElementById('edit_eq_note').value.trim();
+    const wialon = parseWialonUnitId(document.getElementById('edit_eq_wialon_unit_id').value);
 
     if (!name) {
       errorBox.textContent = "Вкажи назву техніки.";
+      errorBox.classList.remove('hidden');
+      return;
+    }
+
+    if (wialon.error) {
+      errorBox.textContent = wialon.error;
       errorBox.classList.remove('hidden');
       return;
     }
@@ -471,11 +517,12 @@ async function renderEditEquipment(user, equipmentId) {
         reg_number: regNumber || null,
         tracks_moto_hours: tracksMotoHours,
         tracks_odometer: tracksOdometer,
+        wialon_unit_id: wialon.value,
         note: note || null
       });
       renderEquipmentList(user);
     } catch (err) {
-      errorBox.textContent = err.message;
+      errorBox.textContent = equipmentSaveErrorText(err);
       errorBox.classList.remove('hidden');
       submitBtn.disabled = false;
       submitBtn.textContent = "Зберегти зміни";
