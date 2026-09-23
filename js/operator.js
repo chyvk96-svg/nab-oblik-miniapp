@@ -25,10 +25,18 @@ function renderOperatorHome(user) {
           <span class="sub">Історія поданих звітів</span>
         </span>
       </button>
+      <button class="menu-btn" id="btn-my-hours">
+        <span class="emoji">🕒</span>
+        <span>
+          Мої години
+          <span class="sub">Підтверджені години за місяць і відомість у Telegram</span>
+        </span>
+      </button>
     </div>
   `;
   document.getElementById('btn-new-report').addEventListener('click', () => renderOperatorForm(user));
   document.getElementById('btn-my-reports').addEventListener('click', () => renderMyReports(user));
+  document.getElementById('btn-my-hours').addEventListener('click', () => renderMyHours(user));
 
   loadDraftsBanner(user);
 }
@@ -194,6 +202,350 @@ async function fetchLatestRejectionComments(reportIds) {
     return map;
   } catch (e) {
     return {};
+  }
+}
+
+// ---------- Мої години: підтверджені людиногодини за період + відомість у Telegram ----------
+// Рядок = один звіт "Фінально підтверджено" (два об'єкти за день = два рядки).
+// Внизу — "Разом" (лише підтверджені). Окремим блоком — "Ще не зараховано"
+// (очікують відповідального / повернені на коригування), у "Разом" не входять.
+// Чернетки не показуються.
+// Кнопка "Надіслати в Telegram": .xlsx → Storage "exports" → рядок у
+// export_files → Database Webhook → Make → файл у чат з ботом.
+// Використовує спільні з admin.js: isoDateLocal, fmtNum, loadXlsxLib, xNum,
+// XLSX_MIME (admin.js підключений на сторінці для всіх ролей).
+
+const HOURS_CONFIRMED_STATUS = 'Фінально підтверджено';
+const HOURS_PENDING_STATUSES = ['Очікує відповідального', 'Повернено на коригування'];
+
+let hoursLoadSeq = 0;
+
+function escHtml(v) {
+  return String(v ?? '').replace(/[&<>"']/g, ch => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+  ));
+}
+
+// Періоди: "this" — з 1-го числа поточного місяця по сьогодні;
+// "prev" — увесь минулий місяць
+function monthPeriod(kind) {
+  const today = new Date();
+  if (kind === 'prev') {
+    const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const last = new Date(today.getFullYear(), today.getMonth(), 0);
+    return { from: isoDateLocal(first), to: isoDateLocal(last) };
+  }
+  const first = new Date(today.getFullYear(), today.getMonth(), 1);
+  return { from: isoDateLocal(first), to: isoDateLocal(today) };
+}
+
+function sumField(rows, key) {
+  return rows.reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
+}
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+async function renderMyHours(user) {
+  app.innerHTML = `
+    ${topbarHtml('Мої години', roleSubtitle(user))}
+    <div class="wrap" style="padding-top:14px">
+      <div class="back-link" id="back-to-menu" style="margin:0 0 4px">← Назад до меню</div>
+      <div class="section" style="padding-bottom:12px">
+        <div style="display:flex;gap:6px">
+          <button type="button" class="btn-reject" style="padding:8px 4px" data-mh-quick="this">Цей місяць</button>
+          <button type="button" class="btn-reject" style="padding:8px 4px" data-mh-quick="prev">Минулий місяць</button>
+        </div>
+        <div class="row2" style="margin-top:8px">
+          <div>
+            <label>З</label>
+            <input type="date" id="mh-from">
+          </div>
+          <div>
+            <label>По</label>
+            <input type="date" id="mh-to">
+          </div>
+        </div>
+      </div>
+      <div id="mh-result" class="msg">Завантаження...</div>
+    </div>
+  `;
+  document.getElementById('back-to-menu').addEventListener('click', () => renderOperatorHome(user));
+
+  const fromEl = document.getElementById('mh-from');
+  const toEl = document.getElementById('mh-to');
+
+  const show = (from, to) => {
+    fromEl.value = from;
+    toEl.value = to;
+    loadMyHours(user, from, to);
+  };
+
+  document.querySelectorAll('[data-mh-quick]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = monthPeriod(btn.getAttribute('data-mh-quick'));
+      show(p.from, p.to);
+    });
+  });
+
+  const onDateChange = () => {
+    if (!fromEl.value || !toEl.value) return;
+    if (fromEl.value > toEl.value) {
+      document.getElementById('mh-result').className = 'msg';
+      document.getElementById('mh-result').textContent = 'Дата "з" не може бути пізнішою за "по".';
+      return;
+    }
+    loadMyHours(user, fromEl.value, toEl.value);
+  };
+  fromEl.addEventListener('change', onDateChange);
+  toEl.addEventListener('change', onDateChange);
+
+  const p = monthPeriod('this');
+  show(p.from, p.to);
+}
+
+async function loadMyHours(user, from, to) {
+  const seq = ++hoursLoadSeq;
+  const resultEl = document.getElementById('mh-result');
+  if (!resultEl) return;
+  resultEl.className = 'msg';
+  resultEl.textContent = 'Завантаження...';
+
+  let reports;
+  try {
+    reports = await supaGet(
+      'daily_reports',
+      `operator_id=eq.${user.id}&work_date=gte.${from}&work_date=lte.${to}&status=neq.Чернетка` +
+      `&select=id,work_date,status,start_time,total_person_hours,travel_hours,transport_hours,equipment(name),objects(name)` +
+      `&order=work_date.asc,start_time.asc`
+    );
+  } catch (e) {
+    if (seq !== hoursLoadSeq) return;
+    resultEl.textContent = 'Помилка завантаження: ' + e.message;
+    return;
+  }
+  if (seq !== hoursLoadSeq) return; // користувач уже вибрав інший період
+
+  const confirmed = (reports || []).filter(r => r.status === HOURS_CONFIRMED_STATUS);
+  const pending = (reports || []).filter(r => HOURS_PENDING_STATUSES.includes(r.status));
+
+  const totals = {
+    person: round2(sumField(confirmed, 'total_person_hours')),
+    travel: round2(sumField(confirmed, 'travel_hours')),
+    transport: round2(sumField(confirmed, 'transport_hours')),
+    days: new Set(confirmed.map(r => r.work_date)).size,
+    pendingPerson: round2(sumField(pending, 'total_person_hours'))
+  };
+
+  resultEl.className = '';
+
+  if (confirmed.length === 0 && pending.length === 0) {
+    resultEl.innerHTML = `<div class="msg" style="padding:30px 10px">За цей період звітів немає.</div>`;
+    return;
+  }
+
+  const cell = 'padding:6px 4px;border-bottom:1px solid var(--line);vertical-align:top';
+  const num = cell + ';text-align:right;font-family:\'Space Mono\',monospace;white-space:nowrap';
+  const head = 'padding:6px 4px;border-bottom:2px solid var(--asphalt);font-family:Oswald,sans-serif;font-weight:600;font-size:11px;text-transform:uppercase;text-align:left';
+  const headNum = head + ';text-align:right';
+
+  const rowHtml = (r, withStatus) => `
+    <tr>
+      <td style="${cell};white-space:nowrap">${formatDateUA(r.work_date).slice(0, 5)}</td>
+      <td style="${cell}">
+        ${escHtml(r.objects?.name || '—')}
+        <div style="font-size:11px;color:var(--ink-soft)">${escHtml(r.equipment?.name || '')}</div>
+        ${withStatus ? `<span class="status-chip ${statusChipClass(r.status)}" style="font-family:'Space Mono',monospace;font-size:9px;padding:1px 5px;border-radius:3px;display:inline-block;margin-top:3px">${escHtml(r.status)}</span>` : ''}
+      </td>
+      <td style="${num}">${fmtNum(r.total_person_hours)}</td>
+      <td style="${num}">${Number(r.travel_hours) ? fmtNum(r.travel_hours) : ''}</td>
+      <td style="${num}">${Number(r.transport_hours) ? fmtNum(r.transport_hours) : ''}</td>
+    </tr>
+  `;
+
+  const tableHead = `
+    <tr>
+      <th style="${head}">Дата</th>
+      <th style="${head}">Об'єкт / техніка</th>
+      <th style="${headNum}">Люд.-год</th>
+      <th style="${headNum}">Переб.</th>
+      <th style="${headNum}">Перев.</th>
+    </tr>
+  `;
+
+  const confirmedHtml = confirmed.length === 0
+    ? `<div class="hint-inline" style="margin:8px 0 0">Підтверджених звітів за цей період ще немає.</div>`
+    : `
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;background:#fff">
+        <thead>${tableHead}</thead>
+        <tbody>${confirmed.map(r => rowHtml(r, false)).join('')}</tbody>
+        <tfoot>
+          <tr style="font-weight:700">
+            <td style="${cell};border-top:2px solid var(--asphalt)" colspan="2">
+              РАЗОМ
+              <div style="font-size:11px;font-weight:400;color:var(--ink-soft)">Робочих днів: ${totals.days}</div>
+            </td>
+            <td style="${num};border-top:2px solid var(--asphalt)">${fmtNum(totals.person)}</td>
+            <td style="${num};border-top:2px solid var(--asphalt)">${totals.travel ? fmtNum(totals.travel) : ''}</td>
+            <td style="${num};border-top:2px solid var(--asphalt)">${totals.transport ? fmtNum(totals.transport) : ''}</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+
+  const pendingHtml = pending.length === 0 ? '' : `
+    <div class="discrepancy-box" style="margin-top:16px">
+      <div class="flag">⏳ ЩЕ НЕ ЗАРАХОВАНО (${pending.length}) · ${fmtNum(totals.pendingPerson)} люд.-год</div>
+      <div class="hint-inline" style="margin:0 0 6px">Ці звіти ще не підтверджені — у "Разом" не входять.</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12.5px;background:#fff">
+        <thead>${tableHead}</thead>
+        <tbody>${pending.map(r => rowHtml(r, true)).join('')}</tbody>
+      </table>
+    </div>
+  `;
+
+  resultEl.innerHTML = `
+    <div class="report-card" style="border-left-color:var(--brand-yellow)">
+      <div class="top-row">
+        <span class="date">${formatDateUA(from)} – ${formatDateUA(to)}</span>
+      </div>
+      <div class="hours">Людиногодини: <b>${fmtNum(totals.person)}</b></div>
+      <div class="detail-row"><span class="label">Робочих днів:</span> ${totals.days}</div>
+      ${totals.travel ? `<div class="detail-row"><span class="label">Перебазування:</span> ${fmtNum(totals.travel)} год</div>` : ''}
+      ${totals.transport ? `<div class="detail-row"><span class="label">Перевезення людей:</span> ${fmtNum(totals.transport)} год</div>` : ''}
+    </div>
+    ${confirmedHtml}
+    ${pendingHtml}
+    <button type="button" class="btn-add-top" id="mh-send-btn" style="margin-top:18px">📥 Надіслати в Telegram</button>
+    <div class="hint-inline" id="mh-send-hint" style="text-align:center;margin-bottom:10px">
+      Файл Excel прийде в чат з ботом — там зберігається історія ваших відомостей.
+    </div>
+  `;
+
+  const sendBtn = document.getElementById('mh-send-btn');
+  sendBtn.addEventListener('click', () => sendHoursToTelegram(sendBtn, user, from, to, confirmed, pending, totals));
+}
+
+// ---------- Відомість годин: Excel → Storage → export_files → бот ----------
+
+// Випадковий UUID (для папки файлу у сховищі; формат перевіряє база)
+function exportUuid() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+function buildHoursWorkbook(XLSX, user, from, to, confirmed, pending, totals) {
+  const rowOf = (r, withStatus) => {
+    const row = [
+      formatDateUA(r.work_date),
+      r.objects?.name || '',
+      r.equipment?.name || '',
+      xNum(r.total_person_hours),
+      xNum(r.travel_hours) || null,
+      xNum(r.transport_hours) || null
+    ];
+    if (withStatus) row.push(r.status);
+    return row;
+  };
+
+  const header = ['Дата', "Об'єкт", 'Техніка', 'Людиногодини', 'Перебазування, год', 'Перевезення людей, год'];
+
+  const aoa = [
+    [`Відомість годин: ${user.full_name}`],
+    [`Період: ${formatDateUA(from)} – ${formatDateUA(to)}`],
+    [`Сформовано: ${formatDateTimeUA(new Date().toISOString())} (лише звіти "Фінально підтверджено")`],
+    [],
+    header
+  ];
+  confirmed.forEach(r => aoa.push(rowOf(r, false)));
+  if (confirmed.length === 0) aoa.push(['Підтверджених звітів за цей період немає']);
+  aoa.push([]);
+  aoa.push(['РАЗОМ', '', '', totals.person, totals.travel, totals.transport]);
+  aoa.push(['Робочих днів', '', '', totals.days]);
+
+  if (pending.length > 0) {
+    aoa.push([]);
+    aoa.push(['ЩЕ НЕ ЗАРАХОВАНО (не входить у "Разом")']);
+    aoa.push(header.concat(['Статус']));
+    pending.forEach(r => aoa.push(rowOf(r, true)));
+    aoa.push(['Разом не зараховано', '', '', totals.pendingPerson]);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [
+    { wch: 12 }, { wch: 40 }, { wch: 28 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 26 }
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Години');
+  return wb;
+}
+
+function hoursCaption(user, from, to, pending, totals) {
+  const lines = [
+    `🕒 Відомість годин: ${user.full_name}`,
+    `📅 ${formatDateUA(from)} – ${formatDateUA(to)}`,
+    `✅ Людиногодини: ${fmtNum(totals.person)} · робочих днів: ${totals.days}`
+  ];
+  if (totals.travel) lines.push(`🚛 Перебазування: ${fmtNum(totals.travel)} год`);
+  if (totals.transport) lines.push(`🚌 Перевезення людей: ${fmtNum(totals.transport)} год`);
+  if (pending.length > 0) {
+    lines.push(`⏳ Ще не зараховано: ${pending.length} звіт(и), ${fmtNum(totals.pendingPerson)} люд.-год`);
+  }
+  return lines.join('\n');
+}
+
+async function sendHoursToTelegram(btn, user, from, to, confirmed, pending, totals) {
+  const original = btn.textContent;
+  const hint = document.getElementById('mh-send-hint');
+  btn.disabled = true;
+  btn.textContent = 'Формування файлу...';
+
+  try {
+    const XLSX = await loadXlsxLib();
+    const wb = buildHoursWorkbook(XLSX, user, from, to, confirmed, pending, totals);
+    const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+
+    const fileName = `Hodyny_${user.id}_${from}_${to}.xlsx`;
+    const path = `${exportUuid()}/${fileName}`;
+
+    btn.textContent = 'Надсилання...';
+
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/exports/${path}`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': XLSX_MIME,
+        'x-upsert': 'false'
+      },
+      body: new Blob([buffer], { type: XLSX_MIME })
+    });
+    if (!res.ok) {
+      throw new Error('не вдалося зберегти файл у сховище: ' + (await res.text()));
+    }
+
+    await supaInsert('export_files', {
+      user_id: user.id,
+      export_type: 'Години оператора',
+      period_from: from,
+      period_to: to,
+      file_path: path,
+      file_name: fileName,
+      caption: hoursCaption(user, from, to, pending, totals)
+    });
+
+    btn.textContent = '✅ Надіслано в чат з ботом';
+    if (hint) hint.textContent = 'Файл прийде в чат з ботом за кілька секунд. Щоб побачити його — закрийте Mini App.';
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 4000);
+  } catch (e) {
+    alert('Не вдалося надіслати відомість: ' + e.message);
+    btn.textContent = original;
+    btn.disabled = false;
   }
 }
 
