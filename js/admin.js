@@ -559,14 +559,14 @@ async function renderWialonCheck(user) {
   `;
   document.getElementById('back-to-menu-wialon').addEventListener('click', () => renderAdminHome(user));
 
-  wirePeriodPicker('wc', (from, to) => loadWialonSummary(from, to));
+  wirePeriodPicker('wc', (from, to) => loadWialonSummary(user, from, to));
 }
 
 // Лічильник запитів: якщо користувач швидко змінює період, показуємо
 // лише результат останнього запиту (попередні відповіді ігноруються)
 let wialonLoadSeq = 0;
 
-async function loadWialonSummary(from, to) {
+async function loadWialonSummary(user, from, to) {
   const listEl = document.getElementById('wialon-list');
   const seq = ++wialonLoadSeq;
   listEl.className = 'msg';
@@ -590,7 +590,8 @@ async function loadWialonSummary(from, to) {
   listEl.className = '';
   listEl.innerHTML = `
     <div class="meta" style="margin:0 0 8px">Період: ${formatDateUA(from)} – ${formatDateUA(to)} · техніки: ${rows.length}</div>
-    <button type="button" class="btn-add-top" id="wc-excel-btn">⬇ Завантажити Excel</button>
+    <button type="button" class="btn-add-top" id="wc-excel-btn">📥 Надіслати в Telegram</button>
+    <div class="hint-inline" style="text-align:center;margin:-10px 0 14px">Файл Excel прийде вам у чат з ботом.</div>
     ${rows.map(r => wialonSummaryCardHtml(r)).join('')}
   `;
 
@@ -599,7 +600,7 @@ async function loadWialonSummary(from, to) {
   });
 
   const excelBtn = document.getElementById('wc-excel-btn');
-  excelBtn.addEventListener('click', () => exportWialonExcel(excelBtn, rows, from, to));
+  excelBtn.addEventListener('click', () => exportWialonExcel(excelBtn, user, rows, from, to));
 }
 
 // Статус техніки для таблиці (та сама логіка, що й мітка на картці)
@@ -768,7 +769,7 @@ async function renderObjectReport(user) {
 
   const show = (from, to) => {
     lastPeriod = { from, to };
-    loadObjectReport(objectSelect.value, objectSelect.options[objectSelect.selectedIndex].text, from, to);
+    loadObjectReport(user, objectSelect.value, objectSelect.options[objectSelect.selectedIndex].text, from, to);
   };
 
   objectSelect.addEventListener('change', () => {
@@ -780,7 +781,7 @@ async function renderObjectReport(user) {
 
 let objectLoadSeq = 0;
 
-async function loadObjectReport(objectId, objectName, from, to) {
+async function loadObjectReport(user, objectId, objectName, from, to) {
   const resEl = document.getElementById('objrep-result');
   const seq = ++objectLoadSeq;
   resEl.className = 'msg';
@@ -821,7 +822,8 @@ async function loadObjectReport(objectId, objectName, from, to) {
       <div class="detail-row">Заправка: <b>${fmtNum(sum('fueling_liters'), 1)}</b> л</div>
     </div>
 
-    <button type="button" class="btn-add-top" id="or-excel-btn" style="margin-top:6px">⬇ Завантажити Excel</button>
+    <button type="button" class="btn-add-top" id="or-excel-btn" style="margin-top:6px">📥 Надіслати в Telegram</button>
+    <div class="hint-inline" style="text-align:center;margin:-10px 0 0">Файл Excel прийде вам у чат з ботом.</div>
 
     <div class="meta" style="margin:14px 0 8px">По техніці й операторах:</div>
 
@@ -843,7 +845,7 @@ async function loadObjectReport(objectId, objectName, from, to) {
   `;
 
   const excelBtn = document.getElementById('or-excel-btn');
-  excelBtn.addEventListener('click', () => exportObjectExcel(excelBtn, objectId, objectName, rows, from, to));
+  excelBtn.addEventListener('click', () => exportObjectExcel(excelBtn, user, objectId, objectName, rows, from, to));
 }
 
 // ======================================================
@@ -851,9 +853,8 @@ async function loadObjectReport(objectId, objectName, from, to) {
 // Файл .xlsx формується прямо в Mini App (бібліотека SheetJS, вантажиться
 // лише при першому натисканні), кладеться в Supabase Storage (сховище
 // "exports", публічне на читання, назва з випадковим ідентифікатором),
-// після чого Telegram показує стандартне вікно "Завантажити файл"
-// (Telegram.WebApp.downloadFile, Telegram 8.0+). Для старих версій —
-// відкривається пряме посилання на файл.
+// і надсилається в чат з ботом через export_files → Make (sendWorkbookToBot).
+// Допоміжні loadXlsxLib / xNum / XLSX_MIME використовує й operator.js.
 // ======================================================
 
 const XLSX_LIB_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
@@ -900,15 +901,14 @@ function makeSheet(XLSX, rowsArr, headers) {
   return ws;
 }
 
-function randomId() {
-  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
-  return Date.now().toString(36) + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
-}
-
-// Завантажує книгу в Supabase Storage і віддає користувачу
-async function deliverWorkbook(XLSX, wb, fileName) {
+// Надсилає книгу в чат з ботом: Storage "exports" → рядок у export_files →
+// Database Webhook → Make "Вивантаження → файл у Telegram" → бот.
+// Отримувач — viewer (хто натиснув). Тип має бути дозволений тригером
+// export_files ("Звірка з Wialon" / "Звіт по об'єкту" — лише адміністратор).
+// exportUuid() — з operator.js.
+async function sendWorkbookToBot(XLSX, wb, { fileName, viewer, exportType, from, to, caption }) {
   const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-  const path = `${randomId()}/${fileName}`;
+  const path = `${exportUuid()}/${fileName}`;
 
   const res = await fetch(`${SUPABASE_URL}/storage/v1/object/exports/${path}`, {
     method: 'POST',
@@ -925,15 +925,16 @@ async function deliverWorkbook(XLSX, wb, fileName) {
     throw new Error('не вдалося зберегти файл у сховище: ' + errText);
   }
 
-  const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/exports/${path}`;
-
-  if (tg && typeof tg.downloadFile === 'function' && tg.isVersionAtLeast && tg.isVersionAtLeast('8.0')) {
-    tg.downloadFile({ url: publicUrl, file_name: fileName });
-  } else if (tg && typeof tg.openLink === 'function') {
-    tg.openLink(publicUrl);
-  } else {
-    window.open(publicUrl, '_blank');
-  }
+  await supaInsert('export_files', {
+    user_id: viewer.id,
+    subject_user_id: viewer.id,
+    export_type: exportType,
+    period_from: from,
+    period_to: to,
+    file_path: path,
+    file_name: fileName,
+    caption
+  });
 }
 
 // Обгортка для кнопки: стан "Формування...", помилки — alert
@@ -943,8 +944,8 @@ async function runExport(btn, job) {
   btn.textContent = 'Формування файлу...';
   try {
     await job();
-    btn.textContent = '✅ Файл готовий';
-    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 2500);
+    btn.textContent = '✅ Надіслано в чат з ботом';
+    setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 4000);
   } catch (e) {
     alert('Помилка вивантаження: ' + e.message);
     btn.textContent = original;
@@ -955,7 +956,7 @@ async function runExport(btn, job) {
 // ---------- Excel: звірка з Wialon ----------
 // Аркуш "Підсумок" — те саме, що картки на екрані; аркуш "По днях" —
 // розбивка по днях для кожної техніки.
-function exportWialonExcel(btn, rows, from, to) {
+function exportWialonExcel(btn, user, rows, from, to) {
   runExport(btn, async () => {
     const XLSX = await loadXlsxLib();
 
@@ -1005,14 +1006,27 @@ function exportWialonExcel(btn, rows, from, to) {
     XLSX.utils.book_append_sheet(wb, summarySheet, 'Підсумок');
     XLSX.utils.book_append_sheet(wb, dailySheet, 'По днях');
 
-    await deliverWorkbook(XLSX, wb, `Zvirka_Wialon_${from}_${to}.xlsx`);
+    const checkCount = rows.filter(r => wialonRowStatus(r) === 'перевірити').length;
+    const noWialonCount = rows.filter(r => wialonRowStatus(r) === 'без Wialon').length;
+    await sendWorkbookToBot(XLSX, wb, {
+      fileName: `Zvirka_Wialon_${from}_${to}.xlsx`,
+      viewer: user,
+      exportType: 'Звірка з Wialon',
+      from,
+      to,
+      caption: [
+        '🛰️ Звірка з Wialon',
+        `📅 ${formatDateUA(from)} – ${formatDateUA(to)}`,
+        `Техніки: ${rows.length} · ⚠ перевірити: ${checkCount} · без Wialon: ${noWialonCount}`
+      ].join('\n')
+    });
   });
 }
 
 // ---------- Excel: звіт по об'єкту ----------
 // Аркуші: "Разом" (підсумок об'єкта), "Техніка й оператори" (те саме, що
 // картки на екрані), "Звіти" — кожен звіт окремим рядком.
-function exportObjectExcel(btn, objectId, objectName, rows, from, to) {
+function exportObjectExcel(btn, user, objectId, objectName, rows, from, to) {
   runExport(btn, async () => {
     const XLSX = await loadXlsxLib();
 
@@ -1104,6 +1118,19 @@ function exportObjectExcel(btn, objectId, objectName, rows, from, to) {
     XLSX.utils.book_append_sheet(wb, groupSheet, 'Техніка й оператори');
     XLSX.utils.book_append_sheet(wb, reportsSheet, 'Звіти');
 
-    await deliverWorkbook(XLSX, wb, `Zvit_obiekt_${objectId}_${from}_${to}.xlsx`);
+    await sendWorkbookToBot(XLSX, wb, {
+      fileName: `Zvit_obiekt_${String(objectId).replace(/[^A-Za-z0-9_-]/g, '')}_${from}_${to}.xlsx`,
+      viewer: user,
+      exportType: "Звіт по об'єкту",
+      from,
+      to,
+      caption: [
+        `🏗️ Звіт по об'єкту: ${objectName}`,
+        `📅 ${formatDateUA(from)} – ${formatDateUA(to)}`,
+        `Звітів: ${sum('reports_count')} (підтверджено ${sum('confirmed_count')})`,
+        `Мотогодини: ${fmtNum(sum('moto_hours'))} · людиногодини: ${fmtNum(sum('person_hours'))}`,
+        `Заправка: ${fmtNum(sum('fueling_liters'), 1)} л`
+      ].join('\n')
+    });
   });
 }
