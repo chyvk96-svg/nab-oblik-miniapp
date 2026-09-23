@@ -65,6 +65,13 @@ function renderAdminHome(user) {
           <span class="sub">Додати / редагувати / деактивувати</span>
         </span>
       </button>
+      <button class="menu-btn" id="btn-pending-reports">
+        <span class="emoji">⏳</span>
+        <span>
+          Непідтверджені звіти
+          <span class="sub">По всій компанії, лише перегляд</span>
+        </span>
+      </button>
       <button class="menu-btn" id="btn-closed-reports">
         <span class="emoji">📊</span>
         <span>
@@ -81,6 +88,7 @@ function renderAdminHome(user) {
   document.getElementById('btn-users').addEventListener('click', () => renderUserList(user));
   document.getElementById('btn-equipment').addEventListener('click', () => renderEquipmentList(user));
   document.getElementById('btn-customers').addEventListener('click', () => renderCustomersList(user));
+  document.getElementById('btn-pending-reports').addEventListener('click', () => renderAdminPendingReports(user));
   document.getElementById('btn-closed-reports').addEventListener('click', () => renderAdminClosedReports(user));
 }
 
@@ -230,6 +238,52 @@ async function renderAddUser(user) {
       submitBtn.textContent = "Створити користувача";
     }
   });
+}
+
+// ---------- Непідтверджені звіти по всій компанії (тільки перегляд) ----------
+// На відміну від "Мої підтвердження" (responsible.js) — показує звіти всіх
+// відповідальних, без прив'язки до того, чи адміністратор сам за них відповідає.
+// Тільки перегляд: підтвердити/повернути на коригування звідси не можна —
+// це лишається дією призначеного відповідального.
+
+async function renderAdminPendingReports(user) {
+  app.innerHTML = `
+    ${topbarHtml('Непідтверджені звіти', roleSubtitle(user))}
+    <div class="wrap" style="padding-top:14px">
+      <div class="back-link" id="back-to-menu-pending" style="margin:0 0 14px">← Назад до меню</div>
+      <div id="admin-pending-list" class="msg">Завантаження...</div>
+    </div>
+  `;
+  document.getElementById('back-to-menu-pending').addEventListener('click', () => renderAdminHome(user));
+
+  let reports;
+  try {
+    reports = await supaGet(
+      'daily_reports',
+      `status=eq.Очікує відповідального&select=${REPORT_SELECT_FIELDS}&order=work_date.asc`
+    );
+  } catch (e) {
+    document.getElementById('admin-pending-list').textContent = 'Помилка завантаження: ' + e.message;
+    return;
+  }
+
+  const listEl = document.getElementById('admin-pending-list');
+
+  if (!reports || reports.length === 0) {
+    listEl.textContent = 'Непідтверджених звітів немає.';
+    return;
+  }
+
+  listEl.className = '';
+  listEl.innerHTML = reports.map(r => `
+    <div class="report-card">
+      <div class="top-row">
+        <span class="date">${formatDateUA(r.work_date)}</span>
+        <span class="status-chip ${statusChipClass(r.status)}">${r.status}</span>
+      </div>
+      ${reportDetailsHtml(r)}
+    </div>
+  `).join('');
 }
 
 // ---------- Усі закриті звіти по всій компанії (тільки перегляд) ----------
