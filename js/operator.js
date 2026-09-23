@@ -8,7 +8,7 @@ const HOURS_EPSILON = 0.05; // допустима похибка при порі
 
 function renderOperatorHome(user) {
   app.innerHTML = `
-    ${topbarHtml('Головне меню', `Оператор: ${user.full_name}`)}
+    ${topbarHtml('Головне меню', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px" id="drafts-banner-wrap"></div>
     <div class="menu-list">
       <button class="menu-btn" id="btn-new-report">
@@ -107,7 +107,7 @@ async function loadDraftsBanner(user) {
 
 async function renderMyReports(user) {
   app.innerHTML = `
-    ${topbarHtml('Мої записи', `Оператор: ${user.full_name}`)}
+    ${topbarHtml('Мої записи', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-menu" style="margin:0 0 14px">← Назад до меню</div>
       <div id="reports-list" class="msg">Завантаження...</div>
@@ -261,7 +261,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     .join('');
 
   app.innerHTML = `
-    ${topbarHtml(isEdit ? 'Редагування звіту' : (isDraftContinuation ? 'Продовження чернетки' : 'Внести дані'), `Оператор: ${user.full_name}`)}
+    ${topbarHtml(isEdit ? 'Редагування звіту' : (isDraftContinuation ? 'Продовження чернетки' : 'Внести дані'), roleSubtitle(user))}
     <div class="wrap">
     <div class="back-link" id="back-to-menu-form" style="margin:14px 0 0">← Назад до меню</div>
     <div class="hint-inline" id="draft-save-status" style="margin-top:6px"></div>
@@ -908,7 +908,7 @@ function renderReportPreview(user, payload, isEdit, existingReport, equipmentNam
   };
 
   app.innerHTML = `
-    ${topbarHtml('Перевірка звіту', `Оператор: ${user.full_name}`)}
+    ${topbarHtml('Перевірка звіту', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-form-preview" style="margin:0 0 14px">← Назад до редагування</div>
       <div class="report-card">
