@@ -64,12 +64,12 @@ function renderAccountantHome(user) {
 //     людиногодини, перебазування;
 //   - "Звіти" — кожен звіт окремим рядком, скорочений набір колонок.
 // Дані — усі звіти об'єкта за період, крім чернеток (як і на екрані).
-// Допоміжні loadXlsxLib / makeSheet / xNum / runExport / sendWorkbookToBot —
-// з admin.js.
+// Оформлення — ExcelJS (loadExcelJsLib / xlStyledSheet / sendXlsxBufferToBot
+// з admin.js), як і в адмін-версії.
 
 function exportObjectExcelAccountant(btn, user, objectId, objectName, from, to) {
   runExport(btn, async () => {
-    const XLSX = await loadXlsxLib();
+    const ExcelJS = await loadExcelJsLib();
 
     const reports = await supaGet(
       'daily_reports',
@@ -80,65 +80,15 @@ function exportObjectExcelAccountant(btn, user, objectId, objectName, from, to) 
     );
     const list = reports || [];
 
-    // Зведення по техніці (незалежно від операторів)
-    const byEquipment = new Map();
-    list.forEach(r => {
-      const key = r.equipment_id || '—';
-      if (!byEquipment.has(key)) {
-        byEquipment.set(key, {
-          name: r.equipment?.name || '—',
-          dates: new Set(),
-          first: r.work_date,
-          last: r.work_date,
-          moto: 0,
-          person: 0,
-          travel: 0
-        });
-      }
-      const g = byEquipment.get(key);
-      g.dates.add(r.work_date);
-      if (r.work_date < g.first) g.first = r.work_date;
-      if (r.work_date > g.last) g.last = r.work_date;
-      g.moto += Number(r.total_moto_hours) || 0;
-      g.person += Number(r.total_person_hours) || 0;
-      g.travel += Number(r.travel_hours) || 0;
-    });
+    const equipmentRows = groupReportsByEquipment(list);
+    const wb = buildAccountantObjectWorkbook(ExcelJS, { objectName, from, to, list, equipmentRows });
+    const buffer = await wb.xlsx.writeBuffer();
+
     const r2 = n => Math.round(n * 100) / 100;
-    const equipmentRows = Array.from(byEquipment.values())
-      .sort((a, b) => a.name.localeCompare(b.name, 'uk'));
-
-    const equipmentSheet = makeSheet(XLSX, equipmentRows, [
-      { title: 'Техніка', get: g => g.name },
-      { title: 'Перша дата', get: g => formatDateUA(g.first) },
-      { title: 'Остання дата', get: g => formatDateUA(g.last) },
-      { title: 'Днів', get: g => g.dates.size },
-      { title: 'Мотогодини', get: g => r2(g.moto) },
-      { title: 'Людиногодини', get: g => r2(g.person) },
-      { title: 'Перебазування, год', get: g => r2(g.travel) }
-    ]);
-
-    const reportsSheet = makeSheet(XLSX, list, [
-      { title: 'Дата', get: r => formatDateUA(r.work_date) },
-      { title: 'Звіт', get: r => r.id },
-      { title: 'Статус', get: r => r.status },
-      { title: 'Техніка', get: r => r.equipment?.name || '' },
-      { title: 'Оператор', get: r => r.users?.full_name || '' },
-      { title: 'Замовник', get: r => r.customer_name || '' },
-      { title: 'Мотогодини', get: r => xNum(r.total_moto_hours) },
-      { title: 'Людиногодини', get: r => xNum(r.total_person_hours) },
-      { title: 'Перебазування, год', get: r => xNum(r.travel_hours) },
-      { title: 'Маршрут перебазування', get: r => r.travel_route || '' },
-      { title: 'Примітка', get: r => r.operator_note || '' }
-    ]);
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, equipmentSheet, 'Техніка');
-    XLSX.utils.book_append_sheet(wb, reportsSheet, 'Звіти');
-
     const totalMoto = r2(equipmentRows.reduce((a, g) => a + g.moto, 0));
     const totalPerson = r2(equipmentRows.reduce((a, g) => a + g.person, 0));
 
-    await sendWorkbookToBot(XLSX, wb, {
+    await sendXlsxBufferToBot(buffer, {
       fileName: `Zvit_obiekt_${String(objectId).replace(/[^A-Za-z0-9_-]/g, '')}_${from}_${to}.xlsx`,
       viewer: user,
       exportType: "Звіт по об'єкту",
@@ -152,4 +102,81 @@ function exportObjectExcelAccountant(btn, user, objectId, objectName, from, to) 
       ].join('\n')
     });
   });
+}
+
+// Зведення звітів по техніці (незалежно від операторів)
+function groupReportsByEquipment(list) {
+  const byEquipment = new Map();
+  list.forEach(r => {
+    const key = r.equipment_id || '—';
+    if (!byEquipment.has(key)) {
+      byEquipment.set(key, {
+        name: r.equipment?.name || '—',
+        dates: new Set(),
+        first: r.work_date,
+        last: r.work_date,
+        moto: 0,
+        person: 0,
+        travel: 0
+      });
+    }
+    const g = byEquipment.get(key);
+    g.dates.add(r.work_date);
+    if (r.work_date < g.first) g.first = r.work_date;
+    if (r.work_date > g.last) g.last = r.work_date;
+    g.moto += Number(r.total_moto_hours) || 0;
+    g.person += Number(r.total_person_hours) || 0;
+    g.travel += Number(r.travel_hours) || 0;
+  });
+  return Array.from(byEquipment.values()).sort((a, b) => a.name.localeCompare(b.name, 'uk'));
+}
+
+// Книга обліковця (оформлена): аркуші "Техніка" і "Звіти"
+function buildAccountantObjectWorkbook(ExcelJS, { objectName, from, to, list, equipmentRows }) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'НАБ ТехОблік';
+  wb.created = new Date();
+  const period = `Період: ${formatDateUA(from)} – ${formatDateUA(to)}`;
+
+  xlStyledSheet(wb, 'Техніка', {
+    title: "Звіт по об'єкту — техніка",
+    subtitle: objectName,
+    note: `${period} · кілька операторів на одній техніці зведено в один рядок`,
+    columns: [
+      { header: 'Техніка', width: 30, type: 'name', get: g => g.name },
+      { header: 'Перша дата', width: 12, type: 'date', get: g => g.first },
+      { header: 'Остання дата', width: 12, type: 'date', get: g => g.last },
+      { header: 'Днів', width: 8, type: 'int', get: g => g.dates.size },
+      { header: 'Мотогодини', width: 12, type: 'hours', get: g => g.moto, total: true },
+      { header: 'Людиногодини', width: 13, type: 'hours', get: g => g.person, total: true },
+      { header: 'Перебазування, год', width: 15, type: 'hours', get: g => g.travel, total: true }
+    ],
+    rows: equipmentRows,
+    totalsLabel: 'РАЗОМ',
+    freezeCols: 1
+  });
+
+  xlStyledSheet(wb, 'Звіти', {
+    title: "Звіт по об'єкту — усі звіти",
+    subtitle: objectName,
+    note: `${period} · чернетки не включено`,
+    columns: [
+      { header: 'Дата', width: 11, type: 'date', get: r => r.work_date },
+      { header: 'Звіт', width: 10, type: 'text', get: r => r.id },
+      { header: 'Статус', width: 23, type: 'status', get: r => r.status },
+      { header: 'Техніка', width: 26, type: 'name', get: r => r.equipment?.name || '' },
+      { header: 'Оператор', width: 26, type: 'name', get: r => r.users?.full_name || '' },
+      { header: 'Замовник', width: 20, type: 'name', get: r => r.customer_name || '' },
+      { header: 'Мотогодини', width: 12, type: 'hours', get: r => r.total_moto_hours, total: true },
+      { header: 'Людиногодини', width: 13, type: 'hours', get: r => r.total_person_hours, total: true },
+      { header: 'Перебазування, год', width: 15, type: 'hours', get: r => r.travel_hours, total: true },
+      { header: 'Маршрут перебазування', width: 30, type: 'long', get: r => r.travel_route || '' },
+      { header: 'Примітка', width: 32, type: 'long', get: r => r.operator_note || '' }
+    ],
+    rows: list,
+    totalsLabel: 'РАЗОМ',
+    freezeCols: 1
+  });
+
+  return wb;
 }
