@@ -852,64 +852,23 @@ async function loadObjectReport(user, objectId, objectName, from, to) {
 
 // ======================================================
 // ВИВАНТАЖЕННЯ В EXCEL
-// Файл .xlsx формується прямо в Mini App (бібліотека SheetJS, вантажиться
-// лише при першому натисканні), кладеться в Supabase Storage (сховище
-// "exports", публічне на читання, назва з випадковим ідентифікатором),
-// і надсилається в чат з ботом через export_files → Make (sendWorkbookToBot).
-// Допоміжні loadXlsxLib / xNum / XLSX_MIME використовує й operator.js.
+// Файл .xlsx формується прямо в Mini App бібліотекою ExcelJS (з оформленням,
+// вантажиться лише при першому натисканні — див. "ОФОРМЛЕНИЙ EXCEL" нижче),
+// кладеться в Supabase Storage (сховище "exports", публічне на читання,
+// назва з випадковим ідентифікатором) і надсилається в чат з ботом через
+// export_files → Make (sendXlsxBufferToBot). Так працюють усі вивантаження:
+// "Звірка з Wialon", "Звіт по об'єкту" (адмін і обліковець — accountant.js),
+// "Години оператора" (operator.js).
 // ======================================================
 
-const XLSX_LIB_URL = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-let xlsxLibPromise = null;
-
-function loadXlsxLib() {
-  if (window.XLSX) return Promise.resolve(window.XLSX);
-  if (xlsxLibPromise) return xlsxLibPromise;
-  xlsxLibPromise = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = XLSX_LIB_URL;
-    s.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error('бібліотека Excel не ініціалізувалась'));
-    s.onerror = () => {
-      xlsxLibPromise = null;
-      reject(new Error('не вдалося завантажити бібліотеку Excel (перевір інтернет)'));
-    };
-    document.head.appendChild(s);
-  });
-  return xlsxLibPromise;
-}
-
-// Число для Excel: справжнє число (не текст), порожнє — порожня клітинка
-function xNum(v) {
-  if (v === null || v === undefined || v === '') return null;
-  const n = Number(v);
-  return isNaN(n) ? null : n;
-}
-
-// Аркуш з масиву рядків-об'єктів; ширина колонок — за найдовшим значенням
-function makeSheet(XLSX, rowsArr, headers) {
-  const data = [headers.map(h => h.title)].concat(
-    rowsArr.map(r => headers.map(h => {
-      const v = h.get(r);
-      return v === undefined ? null : v;
-    }))
-  );
-  const ws = XLSX.utils.aoa_to_sheet(data);
-  ws['!cols'] = headers.map((h, i) => {
-    const maxLen = data.reduce((m, row) => Math.max(m, String(row[i] ?? '').length), 0);
-    return { wch: Math.min(Math.max(maxLen + 2, 8), 50) };
-  });
-  return ws;
-}
-
-// Надсилає книгу в чат з ботом: Storage "exports" → рядок у export_files →
+// Надсилає файл у чат з ботом: Storage "exports" → рядок у export_files →
 // Database Webhook → Make "Вивантаження → файл у Telegram" → бот.
 // Отримувач — viewer (хто натиснув). Тип має бути дозволений тригером
-// export_files ("Звірка з Wialon" / "Звіт по об'єкту" — лише адміністратор).
-// exportUuid() — з operator.js.
-async function sendWorkbookToBot(XLSX, wb, { fileName, viewer, exportType, from, to, caption }) {
-  const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+// export_files ("Звірка з Wialon" — адмін; "Звіт по об'єкту" — адмін і
+// обліковець). exportUuid() — з operator.js.
+async function sendXlsxBufferToBot(buffer, { fileName, viewer, exportType, from, to, caption }) {
   const path = `${exportUuid()}/${fileName}`;
 
   const res = await fetch(`${SUPABASE_URL}/storage/v1/object/exports/${path}`, {
@@ -939,6 +898,245 @@ async function sendWorkbookToBot(XLSX, wb, { fileName, viewer, exportType, from,
   });
 }
 
+// ======================================================
+// ОФОРМЛЕНИЙ EXCEL (бібліотека ExcelJS — кольори, рамки, закріплена шапка,
+// фільтри, формати чисел і дат, друк). Вантажиться лише при натисканні.
+// Використовується всіма вивантаженнями (адмін, обліковець, оператор).
+// ======================================================
+
+const EXCELJS_LIB_URL = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+
+let excelJsLibPromise = null;
+
+function loadExcelJsLib() {
+  if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  if (excelJsLibPromise) return excelJsLibPromise;
+  excelJsLibPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = EXCELJS_LIB_URL;
+    s.onload = () => window.ExcelJS ? resolve(window.ExcelJS) : reject(new Error('бібліотека Excel не ініціалізувалась'));
+    s.onerror = () => {
+      excelJsLibPromise = null;
+      reject(new Error('не вдалося завантажити бібліотеку Excel (перевір інтернет)'));
+    };
+    document.head.appendChild(s);
+  });
+  return excelJsLibPromise;
+}
+
+// Кольори оформлення (ARGB)
+const XL = {
+  headerFill: 'FFF5C400',   // фірмовий жовтий
+  headerFont: 'FF141311',   // асфальт
+  titleFont: 'FF141311',
+  noteFont: 'FF6E6A5E',
+  zebraFill: 'FFF7F6F2',    // смуга через рядок
+  totalFill: 'FFFDF1C2',    // рядок "РАЗОМ"
+  border: 'FFBFBBB0',
+  statusFinal: 'FFE4F0E9',
+  statusWait: 'FFFDF3E2',
+  statusCorr: 'FFFBEAE3',
+  greyFill: 'FFEDEBE6'
+};
+
+// Формати: тип колонки → формат числа і вирівнювання
+// numFmt — формат у рядках даних (нулі не показуються, щоб таблиця не
+// рябіла "0,00"); totalFmt — у рядку "РАЗОМ" і на аркуші "Разом" (з нулями)
+const XL_TYPES = {
+  text:   { numFmt: null,               totalFmt: null,   horizontal: 'center' },
+  name:   { numFmt: null,               totalFmt: null,   horizontal: 'center' },
+  long:   { numFmt: null,               totalFmt: null,   horizontal: 'left' },
+  status: { numFmt: null,               totalFmt: null,   horizontal: 'center' },
+  date:   { numFmt: 'dd.mm.yyyy',       totalFmt: null,   horizontal: 'center' },
+  int:    { numFmt: '0;-0;;@',          totalFmt: '0',    horizontal: 'center' },
+  hours:  { numFmt: '0.00;-0.00;;@',    totalFmt: '0.00', horizontal: 'center' },
+  hours1: { numFmt: '0.0;-0.0;;@',      totalFmt: '0.0',  horizontal: 'center' },
+  km:     { numFmt: '0.0;-0.0;;@',      totalFmt: '0.0',  horizontal: 'center' },
+  liters: { numFmt: '0.0;-0.0;;@',      totalFmt: '0.0',  horizontal: 'center' }
+};
+
+// Значення клітинки: дати — справжні дати Excel, числа — числа, порожнє — пусто
+function xlValue(v, type) {
+  if (v === null || v === undefined || v === '') return null;
+  if (type === 'date') {
+    const [y, m, d] = String(v).slice(0, 10).split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d));
+  }
+  if (['int', 'hours', 'hours1', 'km', 'liters'].includes(type)) {
+    const n = Number(v);
+    return isNaN(n) ? null : n;
+  }
+  return String(v);
+}
+
+function xlBorder() {
+  const side = { style: 'thin', color: { argb: XL.border } };
+  return { top: side, left: side, bottom: side, right: side };
+}
+
+// Новий аркуш з налаштуванням друку і заголовком (3 рядки: назва,
+// підзаголовок, примітка + час формування). Повертає номер першого
+// вільного рядка під заголовком (з відступом в один рядок).
+// wide — багато колонок: друк на 2 сторінки по ширині.
+function xlNewSheet(wb, name, { title, subtitle, note, wide = false }) {
+  const ws = wb.addWorksheet(name, {
+    pageSetup: {
+      orientation: 'landscape',
+      paperSize: 9,             // A4
+      fitToPage: true,
+      fitToWidth: wide ? 2 : 1,
+      fitToHeight: 0,
+      horizontalCentered: true,
+      margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 }
+    },
+    headerFooter: { oddFooter: '&LНАБ ТехОблік&RСторінка &P з &N' }
+  });
+
+  // Заголовок не переноситься — довгий текст просто продовжується праворуч
+  const titleRows = [
+    { text: title, size: 14, bold: true, color: XL.titleFont },
+    { text: subtitle || '', size: 12, bold: true, color: XL.titleFont },
+    { text: `${note || ''}${note ? ' · ' : ''}сформовано ${formatDateTimeUA(new Date().toISOString())}`, size: 10, italic: true, color: XL.noteFont }
+  ];
+  titleRows.forEach((t, i) => {
+    const r = i + 1;
+    const cell = ws.getCell(r, 1);
+    cell.value = t.text;
+    cell.font = { name: 'Calibri', size: t.size, bold: !!t.bold, italic: !!t.italic, color: { argb: t.color } };
+    cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: false };
+    ws.getRow(r).height = t.size >= 14 ? 22 : 18;
+  });
+
+  return { ws, nextRow: titleRows.length + 2 };
+}
+
+// Скільки рядків займе текст у колонці заданої ширини (перенос по словах)
+function xlTextLines(text, width) {
+  const max = Math.max(1, width - 2);
+  let lines = 1, len = 0;
+  String(text || '').split(/\s+/).forEach(word => {
+    const w = word.length;
+    if (len === 0) { len = w; }
+    else if (len + 1 + w <= max) { len += 1 + w; }
+    else { lines += 1; len = w; }
+    while (len > max) { lines += 1; len -= max; }
+  });
+  return lines;
+}
+
+// Підпис розділу над таблицею (жирний, без рамок) — для аркушів з кількома таблицями
+function xlSectionTitle(ws, row, text) {
+  const cell = ws.getCell(row, 1);
+  cell.value = text;
+  cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: XL.titleFont } };
+  cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: false };
+  ws.getRow(row).height = 20;
+}
+
+// Таблиця з оформленою шапкою, смугами, рамками і (за потреби) рядком
+// "РАЗОМ" (сума колонок з total: true). Починається з рядка startRow.
+// columns: [{ header, width, type, get(row), total?, align?, typeOf?(row), fillOf?(row) }]
+//   type   — див. XL_TYPES; typeOf — тип для конкретного рядка
+//   fillOf — колір заливки клітинки для рядка (ARGB) або null
+// Повертає { headerRow, firstDataRow, lastDataRow, nextRow }.
+function xlTable(ws, startRow, { columns, rows, totalsLabel, showZeros = false, emptyText = 'Даних за цей період немає' }) {
+  const colCount = columns.length;
+
+  // Висота шапки — під найдовшу назву колонки (приблизний підрахунок рядків)
+  const headerLines = Math.max(2, ...columns.map(c => xlTextLines(c.header, c.width || 12)));
+  const headerRow = ws.getRow(startRow);
+  headerRow.height = 8 + headerLines * 13;
+  columns.forEach((c, i) => {
+    const cell = headerRow.getCell(i + 1);
+    cell.value = c.header;
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: XL.headerFont } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL.headerFill } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    cell.border = xlBorder();
+  });
+
+  const firstDataRow = startRow + 1;
+  rows.forEach((row, idx) => {
+    const r = ws.getRow(firstDataRow + idx);
+    columns.forEach((c, i) => {
+      const type = c.typeOf ? c.typeOf(row) : (c.type || 'text');
+      const fmt = XL_TYPES[type] || XL_TYPES.text;
+      const cell = r.getCell(i + 1);
+      cell.value = xlValue(c.get(row), type);
+      const numFmt = showZeros ? fmt.totalFmt : fmt.numFmt;
+      if (numFmt) cell.numFmt = numFmt;
+      cell.font = { name: 'Calibri', size: 10 };
+      const horizontal = c.align || fmt.horizontal;
+      cell.alignment = { horizontal, vertical: 'middle', wrapText: true, indent: horizontal === 'left' ? 1 : 0 };
+      cell.border = xlBorder();
+      let fill = idx % 2 === 1 ? XL.zebraFill : null;
+      if (type === 'status') {
+        const v = String(cell.value || '');
+        if (v === 'Фінально підтверджено') fill = XL.statusFinal;
+        else if (v === 'Повернено на коригування') fill = XL.statusCorr;
+        else if (v) fill = XL.statusWait;
+      }
+      if (c.fillOf) fill = c.fillOf(row) || fill;
+      if (fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
+    });
+  });
+
+  let lastDataRow = firstDataRow + rows.length - 1;
+  let nextRow = lastDataRow + 1;
+
+  if (rows.length === 0) {
+    ws.mergeCells(firstDataRow, 1, firstDataRow, Math.max(colCount, 2));
+    const cell = ws.getCell(firstDataRow, 1);
+    cell.value = emptyText;
+    cell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: XL.noteFont } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = xlBorder();
+    lastDataRow = firstDataRow;
+    nextRow = firstDataRow + 1;
+  } else if (totalsLabel) {
+    const tr = ws.getRow(nextRow);
+    tr.height = 20;
+    columns.forEach((c, i) => {
+      const cell = tr.getCell(i + 1);
+      const fmt = XL_TYPES[c.type] || XL_TYPES.text;
+      if (i === 0) cell.value = totalsLabel;
+      if (c.total) {
+        const total = rows.reduce((acc, row) => acc + (Number(c.get(row)) || 0), 0);
+        cell.value = Math.round(total * 100) / 100;
+        if (fmt.totalFmt) cell.numFmt = fmt.totalFmt;
+      }
+      cell.font = { name: 'Calibri', size: 10, bold: true };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL.totalFill } };
+      cell.alignment = { horizontal: i === 0 ? 'center' : fmt.horizontal, vertical: 'middle', wrapText: true };
+      cell.border = xlBorder();
+    });
+    nextRow += 1;
+  }
+
+  return { headerRow: startRow, firstDataRow, lastDataRow, nextRow };
+}
+
+// Закріплена шапка (+ перші колонки), фільтри по таблиці, повтор шапки при друці
+function xlFinishSheet(ws, { headerRow, lastDataRow, colCount, freezeCols = 0, filter = true }) {
+  ws.views = [{ state: 'frozen', xSplit: freezeCols, ySplit: headerRow, zoomScale: 100 }];
+  if (filter && lastDataRow > headerRow) {
+    ws.autoFilter = {
+      from: { row: headerRow, column: 1 },
+      to: { row: lastDataRow, column: colCount }
+    };
+  }
+  ws.pageSetup.printTitlesRow = `${headerRow}:${headerRow}`;
+}
+
+// Аркуш з однією таблицею: заголовок + таблиця + закріплення/фільтри/друк.
+function xlStyledSheet(wb, name, { title, subtitle, note, columns, rows, totalsLabel, freezeCols = 0, showZeros = false }) {
+  const { ws, nextRow } = xlNewSheet(wb, name, { title, subtitle, note, wide: columns.length > 16 });
+  ws.columns = columns.map(c => ({ width: c.width || 12 }));
+  const t = xlTable(ws, nextRow, { columns, rows, totalsLabel, showZeros });
+  xlFinishSheet(ws, { headerRow: t.headerRow, lastDataRow: rows.length ? t.lastDataRow : t.headerRow, colCount: columns.length, freezeCols });
+  return ws;
+}
+
 // Обгортка для кнопки: стан "Формування...", помилки — alert
 async function runExport(btn, job) {
   const original = btn.textContent;
@@ -960,26 +1158,7 @@ async function runExport(btn, job) {
 // розбивка по днях для кожної техніки.
 function exportWialonExcel(btn, user, rows, from, to) {
   runExport(btn, async () => {
-    const XLSX = await loadXlsxLib();
-
-    const summarySheet = makeSheet(XLSX, rows, [
-      { title: 'Техніка', get: r => r.equipment_name },
-      { title: 'ID у Wialon', get: r => r.wialon_unit_id || '' },
-      { title: 'Статус', get: r => wialonRowStatus(r) },
-      { title: 'Звітів', get: r => xNum(r.reports_count) },
-      { title: 'Днів зі звітами', get: r => xNum(r.report_days) },
-      { title: 'Мотогодини: звіти', get: r => xNum(r.moto_hours_reports) },
-      { title: 'Мотогодини: Wialon', get: r => xNum(r.moto_hours_wialon) },
-      { title: 'Мотогодини: різниця (звіти − Wialon)', get: r => xNum(r.moto_hours_diff) },
-      { title: 'Заправка, л: звіти', get: r => xNum(r.fueling_reports) },
-      { title: 'Заправка, л: Wialon', get: r => xNum(r.fueling_wialon) },
-      { title: 'Заправка, л: різниця', get: r => xNum(r.fueling_diff) },
-      { title: 'Злито, л (Wialon)', get: r => xNum(r.fuel_drained_wialon) },
-      { title: 'Пробіг, км: звіти', get: r => xNum(r.km_reports) },
-      { title: 'Пробіг, км: Wialon', get: r => xNum(r.km_wialon) },
-      { title: 'Днів з даними Wialon', get: r => xNum(r.wialon_days_collected) },
-      { title: 'Днів роботи без звіту', get: r => xNum(r.days_work_without_report) }
-    ]);
+    const ExcelJS = await loadExcelJsLib();
 
     // Розбивка по днях — окремий запит по кожній техніці
     const dailyRows = [];
@@ -988,29 +1167,12 @@ function exportWialonExcel(btn, user, rows, from, to) {
       (days || []).forEach(d => dailyRows.push({ equipment_name: r.equipment_name, ...d }));
     }
 
-    const dailySheet = makeSheet(XLSX, dailyRows, [
-      { title: 'Техніка', get: d => d.equipment_name },
-      { title: 'Дата', get: d => formatDateUA(d.work_date) },
-      { title: 'Звітів', get: d => xNum(d.reports_count) },
-      { title: "Об'єкти", get: d => d.objects || '' },
-      { title: 'Мотогодини: звіти', get: d => xNum(d.moto_hours_reports) },
-      { title: 'Мотогодини: Wialon', get: d => xNum(d.moto_hours_wialon) },
-      { title: 'Мотогодини: різниця', get: d => xNum(d.moto_hours_diff) },
-      { title: 'Заправка, л: звіти', get: d => xNum(d.fueling_reports) },
-      { title: 'Заправка, л: Wialon', get: d => xNum(d.fueling_wialon) },
-      { title: 'Злито, л (Wialon)', get: d => xNum(d.fuel_drained_wialon) },
-      { title: 'Пробіг, км: звіти', get: d => xNum(d.km_reports) },
-      { title: 'Пробіг, км: Wialon', get: d => xNum(d.km_wialon) },
-      { title: 'Дані Wialon', get: d => d.wialon_status || 'не зібрано' }
-    ]);
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, summarySheet, 'Підсумок');
-    XLSX.utils.book_append_sheet(wb, dailySheet, 'По днях');
+    const wb = buildWialonWorkbook(ExcelJS, { rows, dailyRows, from, to });
+    const buffer = await wb.xlsx.writeBuffer();
 
     const checkCount = rows.filter(r => wialonRowStatus(r) === 'перевірити').length;
     const noWialonCount = rows.filter(r => wialonRowStatus(r) === 'без Wialon').length;
-    await sendWorkbookToBot(XLSX, wb, {
+    await sendXlsxBufferToBot(buffer, {
       fileName: `Zvirka_Wialon_${from}_${to}.xlsx`,
       viewer: user,
       exportType: 'Звірка з Wialon',
@@ -1025,6 +1187,79 @@ function exportWialonExcel(btn, user, rows, from, to) {
   });
 }
 
+// Книга "Звірка з Wialon" (оформлена): "Підсумок" і "По днях".
+// Розбіжності понад поріг і дні роботи без звіту підсвічуються.
+function buildWialonWorkbook(ExcelJS, { rows, dailyRows, from, to }) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'НАБ ТехОблік';
+  wb.created = new Date();
+  const period = `Період: ${formatDateUA(from)} – ${formatDateUA(to)}`;
+
+  const bad = XL.statusCorr;
+  const motoBad = v => v !== null && v !== undefined && Math.abs(Number(v)) > WIALON_MOTO_THRESHOLD ? bad : null;
+  const fuelBad = v => v !== null && v !== undefined && Math.abs(Number(v)) > WIALON_FUEL_THRESHOLD ? bad : null;
+  const positiveBad = v => Number(v) > 0 ? bad : null;
+  const statusFill = r => {
+    const st = wialonRowStatus(r);
+    if (st === 'OK') return XL.statusFinal;
+    if (st === 'перевірити') return bad;
+    return XL.greyFill;
+  };
+
+  xlStyledSheet(wb, 'Підсумок', {
+    title: 'Звірка з Wialon — підсумок по техніці',
+    subtitle: `Різниця = звіти − Wialon · підсвічено: мотогодини понад ±${fmtNum(WIALON_MOTO_THRESHOLD)} год, заправка понад ±${WIALON_FUEL_THRESHOLD} л, злив, дні без звіту`,
+    note: period,
+    columns: [
+      { header: 'Техніка', width: 28, type: 'name', get: r => r.equipment_name },
+      { header: 'ID у Wialon', width: 12, type: 'text', get: r => r.wialon_unit_id || '' },
+      { header: 'Статус', width: 13, type: 'text', get: r => wialonRowStatus(r), fillOf: statusFill },
+      { header: 'Звітів', width: 8, type: 'int', get: r => r.reports_count, total: true },
+      { header: 'Днів зі звітами', width: 10, type: 'int', get: r => r.report_days },
+      { header: 'Мотогодини: звіти', width: 12, type: 'hours', get: r => r.moto_hours_reports, total: true },
+      { header: 'Мотогодини: Wialon', width: 12, type: 'hours', get: r => r.moto_hours_wialon, total: true },
+      { header: 'Мотогодини: різниця', width: 12, type: 'hours', get: r => r.moto_hours_diff, fillOf: r => motoBad(r.moto_hours_diff) },
+      { header: 'Заправка, л: звіти', width: 11, type: 'liters', get: r => r.fueling_reports, total: true },
+      { header: 'Заправка, л: Wialon', width: 11, type: 'liters', get: r => r.fueling_wialon, total: true },
+      { header: 'Заправка, л: різниця', width: 11, type: 'liters', get: r => r.fueling_diff, fillOf: r => fuelBad(r.fueling_diff) },
+      { header: 'Злито, л (Wialon)', width: 11, type: 'liters', get: r => r.fuel_drained_wialon, total: true, fillOf: r => positiveBad(r.fuel_drained_wialon) },
+      { header: 'Пробіг, км: звіти', width: 11, type: 'km', get: r => r.km_reports, total: true },
+      { header: 'Пробіг, км: Wialon', width: 11, type: 'km', get: r => r.km_wialon, total: true },
+      { header: 'Днів з даними Wialon', width: 11, type: 'int', get: r => r.wialon_days_collected },
+      { header: 'Днів роботи без звіту', width: 11, type: 'int', get: r => r.days_work_without_report, fillOf: r => positiveBad(r.days_work_without_report) }
+    ],
+    rows,
+    totalsLabel: 'РАЗОМ',
+    freezeCols: 1
+  });
+
+  xlStyledSheet(wb, 'По днях', {
+    title: 'Звірка з Wialon — по днях',
+    subtitle: 'Кожна техніка по днях: звіти операторів (усіх об’єктів за день) проти Wialon',
+    note: period,
+    columns: [
+      { header: 'Техніка', width: 28, type: 'name', get: d => d.equipment_name },
+      { header: 'Дата', width: 11, type: 'date', get: d => d.work_date },
+      { header: 'Звітів', width: 8, type: 'int', get: d => d.reports_count, total: true },
+      { header: "Об'єкти", width: 34, type: 'long', get: d => d.objects || '' },
+      { header: 'Мотогодини: звіти', width: 12, type: 'hours', get: d => d.moto_hours_reports, total: true },
+      { header: 'Мотогодини: Wialon', width: 12, type: 'hours', get: d => d.moto_hours_wialon, total: true },
+      { header: 'Мотогодини: різниця', width: 12, type: 'hours', get: d => d.moto_hours_diff, fillOf: d => motoBad(d.moto_hours_diff) },
+      { header: 'Заправка, л: звіти', width: 11, type: 'liters', get: d => d.fueling_reports, total: true },
+      { header: 'Заправка, л: Wialon', width: 11, type: 'liters', get: d => d.fueling_wialon, total: true },
+      { header: 'Злито, л (Wialon)', width: 11, type: 'liters', get: d => d.fuel_drained_wialon, total: true, fillOf: d => positiveBad(d.fuel_drained_wialon) },
+      { header: 'Пробіг, км: звіти', width: 11, type: 'km', get: d => d.km_reports, total: true },
+      { header: 'Пробіг, км: Wialon', width: 11, type: 'km', get: d => d.km_wialon, total: true },
+      { header: 'Дані Wialon', width: 14, type: 'text', get: d => d.wialon_status || 'не зібрано' }
+    ],
+    rows: dailyRows,
+    totalsLabel: 'РАЗОМ',
+    freezeCols: 2
+  });
+
+  return wb;
+}
+
 // ---------- Excel: звіт по об'єкту ----------
 // Аркуші: "Разом" (підсумок об'єкта), "Техніка й оператори" (те саме, що
 // картки на екрані), "Звіти" — кожен звіт окремим рядком.
@@ -1035,48 +1270,7 @@ function exportObjectExcel(btn, user, objectId, objectName, rows, from, to) {
     return;
   }
   runExport(btn, async () => {
-    const XLSX = await loadXlsxLib();
-
-    const sum = (key) => rows.reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
-    const kmRows = rows.filter(r => r.km !== null);
-
-    const totalSheet = makeSheet(XLSX, [{}], [
-      { title: "Об'єкт", get: () => objectName },
-      { title: 'Період з', get: () => formatDateUA(from) },
-      { title: 'Період по', get: () => formatDateUA(to) },
-      { title: 'Звітів', get: () => sum('reports_count') },
-      { title: 'Підтверджено', get: () => sum('confirmed_count') },
-      { title: 'Техніки', get: () => new Set(rows.map(r => r.equipment_id)).size },
-      { title: 'Операторів', get: () => new Set(rows.map(r => r.operator_id)).size },
-      { title: 'Мотогодини', get: () => sum('moto_hours') },
-      { title: 'Пробіг, км', get: () => kmRows.length ? sum('km') : null },
-      { title: 'Людиногодини', get: () => sum('person_hours') },
-      { title: 'Перебазування, год', get: () => sum('travel_hours') },
-      { title: 'Перевезення людей, год', get: () => sum('transport_hours') },
-      { title: 'Простій, год', get: () => sum('downtime_hours') },
-      { title: 'Ремонт, год', get: () => sum('repair_hours') },
-      { title: 'Поломок', get: () => sum('breakdowns_count') },
-      { title: 'Заправка, л', get: () => sum('fueling_liters') }
-    ]);
-
-    const groupSheet = makeSheet(XLSX, rows, [
-      { title: 'Техніка', get: r => r.equipment_name || '' },
-      { title: 'Оператор', get: r => r.operator_name || '' },
-      { title: 'Перша дата', get: r => formatDateUA(r.first_date) },
-      { title: 'Остання дата', get: r => formatDateUA(r.last_date) },
-      { title: 'Днів', get: r => xNum(r.work_days) },
-      { title: 'Звітів', get: r => xNum(r.reports_count) },
-      { title: 'Підтверджено', get: r => xNum(r.confirmed_count) },
-      { title: 'Мотогодини', get: r => xNum(r.moto_hours) },
-      { title: 'Пробіг, км', get: r => xNum(r.km) },
-      { title: 'Людиногодини', get: r => xNum(r.person_hours) },
-      { title: 'Перебазування, год', get: r => xNum(r.travel_hours) },
-      { title: 'Перевезення людей, год', get: r => xNum(r.transport_hours) },
-      { title: 'Простій, год', get: r => xNum(r.downtime_hours) },
-      { title: 'Ремонт, год', get: r => xNum(r.repair_hours) },
-      { title: 'Поломок', get: r => xNum(r.breakdowns_count) },
-      { title: 'Заправка, л', get: r => xNum(r.fueling_liters) }
-    ]);
+    const ExcelJS = await loadExcelJsLib();
 
     // Усі звіти об'єкта за період (крім чернеток), кожен окремим рядком
     const reports = await supaGet(
@@ -1089,43 +1283,11 @@ function exportObjectExcel(btn, user, objectId, objectName, rows, from, to) {
       `&order=work_date.asc`
     );
 
-    const reportsSheet = makeSheet(XLSX, reports || [], [
-      { title: 'Дата', get: r => formatDateUA(r.work_date) },
-      { title: 'Звіт', get: r => r.id },
-      { title: 'Статус', get: r => r.status },
-      { title: 'Техніка', get: r => r.equipment?.name || '' },
-      { title: 'Оператор', get: r => r.users?.full_name || '' },
-      { title: 'Замовник', get: r => r.customer_name || '' },
-      { title: 'М/г початок', get: r => xNum(r.start_hours) },
-      { title: 'М/г кінець', get: r => xNum(r.end_hours) },
-      { title: 'Мотогодини', get: r => xNum(r.total_moto_hours) },
-      { title: 'Км початок', get: r => xNum(r.start_km) },
-      { title: 'Км кінець', get: r => xNum(r.end_km) },
-      { title: 'Пробіг, км', get: r => xNum(r.total_km) },
-      { title: 'Початок роботи', get: r => formatTimeUA(r.start_time) },
-      { title: 'Кінець роботи', get: r => formatTimeUA(r.end_time) },
-      { title: 'Обід, год', get: r => xNum(r.lunch_hours) },
-      { title: 'Людиногодини', get: r => xNum(r.total_person_hours) },
-      { title: 'Перебазування, год', get: r => xNum(r.travel_hours) },
-      { title: 'Маршрут перебазування', get: r => r.travel_route || '' },
-      { title: 'Перевезення людей, год', get: r => xNum(r.transport_hours) },
-      { title: 'Маршрут перевезення', get: r => r.transport_route || '' },
-      { title: 'Простій, год', get: r => xNum(r.downtime_hours) },
-      { title: 'Причина простою', get: r => r.downtime_reason || '' },
-      { title: 'Заправка, л', get: r => xNum(r.fueling_liters) },
-      { title: 'Звідки заправка', get: r => r.fueling_source || '' },
-      { title: 'Поломка', get: r => r.has_breakdown ? 'так' : '' },
-      { title: 'Опис поломки', get: r => r.breakdown_description || '' },
-      { title: 'Ремонт, год', get: r => xNum(r.repair_hours) },
-      { title: 'Примітка', get: r => r.operator_note || '' }
-    ]);
+    const wb = buildObjectReportWorkbook(ExcelJS, { objectName, from, to, rows, reports: reports || [] });
+    const buffer = await wb.xlsx.writeBuffer();
 
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, totalSheet, 'Разом');
-    XLSX.utils.book_append_sheet(wb, groupSheet, 'Техніка й оператори');
-    XLSX.utils.book_append_sheet(wb, reportsSheet, 'Звіти');
-
-    await sendWorkbookToBot(XLSX, wb, {
+    const sum = (key) => rows.reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
+    await sendXlsxBufferToBot(buffer, {
       fileName: `Zvit_obiekt_${String(objectId).replace(/[^A-Za-z0-9_-]/g, '')}_${from}_${to}.xlsx`,
       viewer: user,
       exportType: "Звіт по об'єкту",
@@ -1140,4 +1302,115 @@ function exportObjectExcel(btn, user, objectId, objectName, rows, from, to) {
       ].join('\n')
     });
   });
+}
+
+// Книга "Звіт по об'єкту" (адміністратор), оформлена: аркуші "Разом",
+// "Техніка й оператори", "Звіти". Чиста функція — без запитів до бази.
+function buildObjectReportWorkbook(ExcelJS, { objectName, from, to, rows, reports }) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'НАБ ТехОблік';
+  wb.created = new Date();
+
+  const sum = (key) => rows.reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
+  const kmRows = rows.filter(r => r.km !== null && r.km !== undefined);
+  const period = `Період: ${formatDateUA(from)} – ${formatDateUA(to)}`;
+
+  // ---- Аркуш "Разом" ----
+  const totalItems = [
+    { label: 'Звітів', value: sum('reports_count'), type: 'int' },
+    { label: 'Підтверджено', value: sum('confirmed_count'), type: 'int' },
+    { label: 'Одиниць техніки', value: new Set(rows.map(r => r.equipment_id)).size, type: 'int' },
+    { label: 'Операторів', value: new Set(rows.map(r => r.operator_id)).size, type: 'int' },
+    { label: 'Мотогодини', value: sum('moto_hours'), type: 'hours' },
+    { label: 'Пробіг, км', value: kmRows.length ? sum('km') : null, type: 'km' },
+    { label: 'Людиногодини', value: sum('person_hours'), type: 'hours' },
+    { label: 'Перебазування, год', value: sum('travel_hours'), type: 'hours' },
+    { label: 'Перевезення людей, год', value: sum('transport_hours'), type: 'hours' },
+    { label: 'Простій, год', value: sum('downtime_hours'), type: 'hours' },
+    { label: 'Ремонт, год', value: sum('repair_hours'), type: 'hours' },
+    { label: 'Поломок', value: sum('breakdowns_count'), type: 'int' },
+    { label: 'Заправка, л', value: sum('fueling_liters'), type: 'liters' }
+  ];
+  xlStyledSheet(wb, 'Разом', {
+    title: "Звіт по об'єкту — разом",
+    subtitle: objectName,
+    note: period,
+    columns: [
+      { header: 'Показник', width: 34, type: 'text', get: it => it.label, align: 'left' },
+      { header: 'Значення', width: 18, get: it => it.value, typeOf: it => it.type }
+    ],
+    rows: totalItems,
+    freezeCols: 0,
+    showZeros: true
+  });
+
+  // ---- Аркуш "Техніка й оператори" ----
+  xlStyledSheet(wb, 'Техніка й оператори', {
+    title: "Звіт по об'єкту — техніка й оператори",
+    subtitle: objectName,
+    note: period,
+    columns: [
+      { header: 'Техніка', width: 26, type: 'name', get: r => r.equipment_name || '' },
+      { header: 'Оператор', width: 26, type: 'name', get: r => r.operator_name || '' },
+      { header: 'Перша дата', width: 12, type: 'date', get: r => r.first_date },
+      { header: 'Остання дата', width: 12, type: 'date', get: r => r.last_date },
+      { header: 'Днів', width: 8, type: 'int', get: r => r.work_days },
+      { header: 'Звітів', width: 9, type: 'int', get: r => r.reports_count, total: true },
+      { header: 'Підтверджено', width: 13, type: 'int', get: r => r.confirmed_count, total: true },
+      { header: 'Мотогодини', width: 12, type: 'hours', get: r => r.moto_hours, total: true },
+      { header: 'Пробіг, км', width: 11, type: 'km', get: r => r.km, total: true },
+      { header: 'Людиногодини', width: 13, type: 'hours', get: r => r.person_hours, total: true },
+      { header: 'Перебазування, год', width: 15, type: 'hours', get: r => r.travel_hours, total: true },
+      { header: 'Перевезення людей, год', width: 13, type: 'hours', get: r => r.transport_hours, total: true },
+      { header: 'Простій, год', width: 10, type: 'hours', get: r => r.downtime_hours, total: true },
+      { header: 'Ремонт, год', width: 10, type: 'hours', get: r => r.repair_hours, total: true },
+      { header: 'Поломок', width: 9, type: 'int', get: r => r.breakdowns_count, total: true },
+      { header: 'Заправка, л', width: 11, type: 'liters', get: r => r.fueling_liters, total: true }
+    ],
+    rows,
+    totalsLabel: 'РАЗОМ',
+    freezeCols: 2
+  });
+
+  // ---- Аркуш "Звіти" ----
+  xlStyledSheet(wb, 'Звіти', {
+    title: "Звіт по об'єкту — усі звіти",
+    subtitle: objectName,
+    note: `${period} · чернетки не включено`,
+    columns: [
+      { header: 'Дата', width: 11, type: 'date', get: r => r.work_date },
+      { header: 'Звіт', width: 10, type: 'text', get: r => r.id },
+      { header: 'Статус', width: 23, type: 'status', get: r => r.status },
+      { header: 'Техніка', width: 24, type: 'name', get: r => r.equipment?.name || '' },
+      { header: 'Оператор', width: 24, type: 'name', get: r => r.users?.full_name || '' },
+      { header: 'Замовник', width: 20, type: 'name', get: r => r.customer_name || '' },
+      { header: 'М/г початок', width: 11, type: 'hours1', get: r => r.start_hours },
+      { header: 'М/г кінець', width: 11, type: 'hours1', get: r => r.end_hours },
+      { header: 'Мотогодини', width: 12, type: 'hours', get: r => r.total_moto_hours, total: true },
+      { header: 'Км початок', width: 11, type: 'km', get: r => r.start_km },
+      { header: 'Км кінець', width: 11, type: 'km', get: r => r.end_km },
+      { header: 'Пробіг, км', width: 10, type: 'km', get: r => r.total_km, total: true },
+      { header: 'Початок роботи', width: 10, type: 'text', get: r => r.start_time ? formatTimeUA(r.start_time) : '' },
+      { header: 'Кінець роботи', width: 10, type: 'text', get: r => r.end_time ? formatTimeUA(r.end_time) : '' },
+      { header: 'Обід, год', width: 8, type: 'hours', get: r => r.lunch_hours },
+      { header: 'Людиногодини', width: 13, type: 'hours', get: r => r.total_person_hours, total: true },
+      { header: 'Перебазування, год', width: 15, type: 'hours', get: r => r.travel_hours, total: true },
+      { header: 'Маршрут перебазування', width: 28, type: 'long', get: r => r.travel_route || '' },
+      { header: 'Перевезення людей, год', width: 12, type: 'hours', get: r => r.transport_hours, total: true },
+      { header: 'Маршрут перевезення', width: 28, type: 'long', get: r => r.transport_route || '' },
+      { header: 'Простій, год', width: 10, type: 'hours', get: r => r.downtime_hours, total: true },
+      { header: 'Причина простою', width: 28, type: 'long', get: r => r.downtime_reason || '' },
+      { header: 'Заправка, л', width: 11, type: 'liters', get: r => r.fueling_liters, total: true },
+      { header: 'Звідки заправка', width: 16, type: 'name', get: r => r.fueling_source || '' },
+      { header: 'Поломка', width: 9, type: 'text', get: r => r.has_breakdown ? 'так' : '' },
+      { header: 'Опис поломки', width: 30, type: 'long', get: r => r.breakdown_description || '' },
+      { header: 'Ремонт, год', width: 10, type: 'hours', get: r => r.repair_hours, total: true },
+      { header: 'Примітка', width: 30, type: 'long', get: r => r.operator_note || '' }
+    ],
+    rows: reports,
+    totalsLabel: 'РАЗОМ',
+    freezeCols: 1
+  });
+
+  return wb;
 }
