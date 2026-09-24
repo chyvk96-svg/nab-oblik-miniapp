@@ -40,6 +40,8 @@ async function main() {
     renderResponsibleHome(currentUser);
   } else if (currentUser.role === 'Адміністратор') {
     renderAdminHome(currentUser);
+  } else if (currentUser.role === 'Обліковець') {
+    renderAccountantHome(currentUser);
   } else {
     renderMessage(`Роль "${currentUser.role}" поки не реалізована в цій версії Mini App. Скоро буде.`);
   }
