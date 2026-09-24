@@ -743,7 +743,7 @@ async function renderObjectReport(user) {
 
   let objectsList;
   try {
-    objectsList = await supaGet('objects', 'select=id,name,status&order=status.asc,name.asc');
+    objectsList = await supaGet('objects', 'select=id,name,status,customers(name)&order=status.asc,name.asc');
   } catch (e) {
     bodyEl.textContent = 'Помилка завантаження: ' + e.message;
     return;
@@ -759,7 +759,7 @@ async function renderObjectReport(user) {
     <div class="section" style="padding-bottom:4px;margin-bottom:0">
       <label>Об'єкт</label>
       <select id="objrep-object">
-        ${objectsList.map(o => `<option value="${o.id}">${o.name}${o.status !== 'Активний' ? ' (закритий)' : ''}</option>`).join('')}
+        ${objectsList.map(o => `<option value="${o.id}">${o.name}${o.customers?.name ? ` (${o.customers.name})` : ''}${o.status !== 'Активний' ? ' — закритий' : ''}</option>`).join('')}
       </select>
     </div>
     ${periodPickerHtml('or')}
@@ -1029,6 +1029,11 @@ function exportWialonExcel(btn, user, rows, from, to) {
 // Аркуші: "Разом" (підсумок об'єкта), "Техніка й оператори" (те саме, що
 // картки на екрані), "Звіти" — кожен звіт окремим рядком.
 function exportObjectExcel(btn, user, objectId, objectName, rows, from, to) {
+  // Обліковець отримує скорочений формат (accountant.js)
+  if (user.role === 'Обліковець') {
+    exportObjectExcelAccountant(btn, user, objectId, objectName, from, to);
+    return;
+  }
   runExport(btn, async () => {
     const XLSX = await loadXlsxLib();
 
