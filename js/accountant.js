@@ -2,17 +2,15 @@
 // Обліковець переглядає і звіряє звіти операторів. Нічого не погоджує,
 // не повертає на коригування і не керує довідниками.
 //
-// Меню — тут. Самі екрани спільні з адміністратором (admin.js):
+// Меню — тут. Два екрани спільні з адміністратором (admin.js):
 //   renderAdminPendingReports(user)  — "Непідтверджені звіти" (лише перегляд)
 //   renderAdminClosedReports(user)   — "Усі закриті звіти"
-//   renderObjectReport(user)         — "Звіт по об'єкту" (+ Excel у бот;
-//                                      тригер export_files дозволяє обліковцю;
-//                                      формат файлу для обліковця — нижче,
-//                                      exportObjectExcelAccountant)
+// "Звіт по об'єкту" в обліковця — ВЛАСНИЙ екран (renderMultiObjectReport,
+// нижче): один або кілька об'єктів галочками, техніка зведена
+// (рішення 2026-09-24: замість окремого "Зведеного", щоб не було дублів).
+// Адмін-екран renderObjectReport обліковцю більше не показується.
 // Кнопка "← Назад до меню" на цих екранах викликає backToRoleMenu(user) —
 // обліковець повертається сюди, адміністратор — у своє меню.
-// Власний екран обліковця — "Зведений по об'єктах" (renderMultiObjectReport,
-// нижче): кілька об'єктів за день/період, техніка зведена.
 // Сповіщень у Telegram обліковець не отримує (рішення 2026-09-24).
 
 // Повернення в головне меню своєї ролі (для спільних екранів admin.js)
@@ -48,153 +46,20 @@ function renderAccountantHome(user) {
         <span class="emoji">🏗️</span>
         <span>
           Звіт по об'єкту
-          <span class="sub">Техніка й оператори на об'єкті за період, Excel у Telegram</span>
-        </span>
-      </button>
-      <button class="menu-btn" id="btn-acc-multi">
-        <span class="emoji">🧮</span>
-        <span>
-          Зведений по об'єктах
-          <span class="sub">Кілька об'єктів за день / період, техніка зведено, Excel у Telegram</span>
+          <span class="sub">Один або кілька об'єктів за день / період, техніка зведено, Excel у Telegram</span>
         </span>
       </button>
     </div>
   `;
   document.getElementById('btn-acc-pending').addEventListener('click', () => renderAdminPendingReports(user));
   document.getElementById('btn-acc-closed').addEventListener('click', () => renderAdminClosedReports(user));
-  document.getElementById('btn-acc-object-report').addEventListener('click', () => renderObjectReport(user));
-  document.getElementById('btn-acc-multi').addEventListener('click', () => renderMultiObjectReport(user));
-}
-
-// ---------- Excel "Звіт по об'єкту" для обліковця ----------
-// Відмінності від адмін-версії (рішення 2026-09-24):
-//   - без аркуша "Разом";
-//   - "Техніка" — ОДИН рядок на техніку за період (кілька операторів
-//     зводяться докупи): перша/остання дата, днів, мотогодини,
-//     людиногодини, перебазування;
-//   - "Звіти" — кожен звіт окремим рядком, скорочений набір колонок.
-// Дані — усі звіти об'єкта за період, крім чернеток (як і на екрані).
-// Оформлення — ExcelJS (loadExcelJsLib / xlStyledSheet / sendXlsxBufferToBot
-// з admin.js), як і в адмін-версії.
-
-function exportObjectExcelAccountant(btn, user, objectId, objectName, from, to) {
-  runExport(btn, async () => {
-    const ExcelJS = await loadExcelJsLib();
-
-    const reports = await supaGet(
-      'daily_reports',
-      `object_id=eq.${objectId}&work_date=gte.${from}&work_date=lte.${to}&status=neq.Чернетка` +
-      `&select=id,work_date,status,customer_name,equipment_id,equipment(name),users!daily_reports_operator_id_fkey(full_name),` +
-      `total_moto_hours,total_person_hours,travel_hours,travel_route,operator_note` +
-      `&order=work_date.asc`
-    );
-    const list = reports || [];
-
-    const equipmentRows = groupReportsByEquipment(list);
-    const wb = buildAccountantObjectWorkbook(ExcelJS, { objectName, from, to, list, equipmentRows });
-    const buffer = await wb.xlsx.writeBuffer();
-
-    const r2 = n => Math.round(n * 100) / 100;
-    const totalMoto = r2(equipmentRows.reduce((a, g) => a + g.moto, 0));
-    const totalPerson = r2(equipmentRows.reduce((a, g) => a + g.person, 0));
-
-    await sendXlsxBufferToBot(buffer, {
-      fileName: `Zvit_obiekt_${String(objectId).replace(/[^A-Za-z0-9_-]/g, '')}_${from}_${to}.xlsx`,
-      viewer: user,
-      exportType: "Звіт по об'єкту",
-      from,
-      to,
-      caption: [
-        `🏗️ Звіт по об'єкту: ${objectName}`,
-        `📅 ${formatDateUA(from)} – ${formatDateUA(to)}`,
-        `Техніки: ${equipmentRows.length} · звітів: ${list.length}`,
-        `Мотогодини: ${fmtNum(totalMoto)} · людиногодини: ${fmtNum(totalPerson)}`
-      ].join('\n')
-    });
-  });
-}
-
-// Зведення звітів по техніці (незалежно від операторів)
-function groupReportsByEquipment(list) {
-  const byEquipment = new Map();
-  list.forEach(r => {
-    const key = r.equipment_id || '—';
-    if (!byEquipment.has(key)) {
-      byEquipment.set(key, {
-        name: r.equipment?.name || '—',
-        dates: new Set(),
-        first: r.work_date,
-        last: r.work_date,
-        moto: 0,
-        person: 0,
-        travel: 0
-      });
-    }
-    const g = byEquipment.get(key);
-    g.dates.add(r.work_date);
-    if (r.work_date < g.first) g.first = r.work_date;
-    if (r.work_date > g.last) g.last = r.work_date;
-    g.moto += Number(r.total_moto_hours) || 0;
-    g.person += Number(r.total_person_hours) || 0;
-    g.travel += Number(r.travel_hours) || 0;
-  });
-  return Array.from(byEquipment.values()).sort((a, b) => a.name.localeCompare(b.name, 'uk'));
-}
-
-// Книга обліковця (оформлена): аркуші "Техніка" і "Звіти"
-function buildAccountantObjectWorkbook(ExcelJS, { objectName, from, to, list, equipmentRows }) {
-  const wb = new ExcelJS.Workbook();
-  wb.creator = 'НАБ ТехОблік';
-  wb.created = new Date();
-  const period = `Період: ${formatDateUA(from)} – ${formatDateUA(to)}`;
-
-  xlStyledSheet(wb, 'Техніка', {
-    title: "Звіт по об'єкту — техніка",
-    subtitle: objectName,
-    note: `${period} · кілька операторів на одній техніці зведено в один рядок`,
-    columns: [
-      { header: 'Техніка', width: 30, type: 'name', get: g => g.name },
-      { header: 'Перша дата', width: 12, type: 'date', get: g => g.first },
-      { header: 'Остання дата', width: 12, type: 'date', get: g => g.last },
-      { header: 'Днів', width: 8, type: 'int', get: g => g.dates.size },
-      { header: 'Мотогодини', width: 12, type: 'hours', get: g => g.moto, total: true },
-      { header: 'Людиногодини', width: 13, type: 'hours', get: g => g.person, total: true },
-      { header: 'Перебазування, год', width: 15, type: 'hours', get: g => g.travel, total: true }
-    ],
-    rows: equipmentRows,
-    totalsLabel: 'РАЗОМ',
-    freezeCols: 1
-  });
-
-  xlStyledSheet(wb, 'Звіти', {
-    title: "Звіт по об'єкту — усі звіти",
-    subtitle: objectName,
-    note: `${period} · чернетки не включено`,
-    columns: [
-      { header: 'Дата', width: 11, type: 'date', get: r => r.work_date },
-      { header: 'Звіт', width: 10, type: 'text', get: r => r.id },
-      { header: 'Статус', width: 23, type: 'status', get: r => r.status },
-      { header: 'Техніка', width: 26, type: 'name', get: r => r.equipment?.name || '' },
-      { header: 'Оператор', width: 26, type: 'name', get: r => r.users?.full_name || '' },
-      { header: 'Замовник', width: 20, type: 'name', get: r => r.customer_name || '' },
-      { header: 'Мотогодини', width: 12, type: 'hours', get: r => r.total_moto_hours, total: true },
-      { header: 'Людиногодини', width: 13, type: 'hours', get: r => r.total_person_hours, total: true },
-      { header: 'Перебазування, год', width: 15, type: 'hours', get: r => r.travel_hours, total: true },
-      { header: 'Маршрут перебазування', width: 30, type: 'long', get: r => r.travel_route || '' },
-      { header: 'Примітка', width: 32, type: 'long', get: r => r.operator_note || '' }
-    ],
-    rows: list,
-    totalsLabel: 'РАЗОМ',
-    freezeCols: 1
-  });
-
-  return wb;
+  document.getElementById('btn-acc-object-report').addEventListener('click', () => renderMultiObjectReport(user));
 }
 
 // ======================================================
-// ЗВЕДЕНИЙ ПО ОБ'ЄКТАХ (рішення 2026-09-24)
-// Обліковець вибирає день або період і кілька об'єктів (галочками; у списку
-// лише об'єкти, де за період є звіти). Excel:
+// ЗВІТ ПО ОБ'ЄКТУ ДЛЯ ОБЛІКОВЦЯ (один або кілька об'єктів, 2026-09-24)
+// Обліковець вибирає день або період і один чи кілька об'єктів (галочками;
+// у списку лише об'єкти, де за період є звіти). Excel:
 //   "Техніка"         — одна техніка = один рядок по всіх вибраних об'єктах
 //                       і операторах (лише фінально підтверджені звіти);
 //   "По об'єктах"     — підсумок по кожному об'єкту (підтверджені);
@@ -214,7 +79,7 @@ function objectDisplayName(obj) {
 
 async function renderMultiObjectReport(user) {
   app.innerHTML = `
-    ${topbarHtml("Зведений по об'єктах", roleSubtitle(user))}
+    ${topbarHtml("Звіт по об'єкту", roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-menu-multi" style="margin:0 0 14px">← Назад до меню</div>
       ${periodPickerHtml('mo')}
@@ -333,33 +198,37 @@ async function loadMultiObjectPeriod(user, from, to) {
   excelBtn.addEventListener('click', () => {
     const ids = new Set(selectedIds());
     const sel = list.filter(r => ids.has(r.object_id || '—'));
-    const names = objects.filter(o => ids.has(o.id)).map(o => o.name);
-    exportMultiObjectExcel(excelBtn, user, sel, names, from, to);
+    const chosen = objects.filter(o => ids.has(o.id));
+    exportMultiObjectExcel(excelBtn, user, sel, chosen.map(o => o.id), chosen.map(o => o.name), from, to);
   });
   refresh();
 }
 
-function exportMultiObjectExcel(btn, user, sel, objectNames, from, to) {
+function exportMultiObjectExcel(btn, user, sel, objectIds, objectNames, from, to) {
   runExport(btn, async () => {
     const ExcelJS = await loadExcelJsLib();
     const confirmed = sel.filter(r => r.status === MULTI_CONFIRMED_STATUS);
     const other = sel.filter(r => r.status !== MULTI_CONFIRMED_STATUS);
 
     const wb = buildMultiObjectWorkbook(ExcelJS, { confirmed, other, objectNames, from, to });
+
     const buffer = await wb.xlsx.writeBuffer();
 
     const sum = (arr, k) => arr.reduce((a, r) => a + (Number(r[k]) || 0), 0);
     const shortNames = objectNames.length <= 3 ? objectNames.join('; ') : `${objectNames.slice(0, 3).join('; ')} … (+${objectNames.length - 3})`;
+    const single = objectIds.length === 1;
+    const fileName = single
+      ? `Zvit_obiekt_${String(objectIds[0]).replace(/[^A-Za-z0-9_-]/g, '')}_${from}_${to}.xlsx`
+      : `Zvit_obiekty_${objectIds.length}_${from}_${to}.xlsx`;
     await sendXlsxBufferToBot(buffer, {
-      fileName: `Zvedenyi_obiekty_${from}_${to}.xlsx`,
+      fileName,
       viewer: user,
       exportType: "Звіт по об'єкту",
       from,
       to,
       caption: [
-        `🧮 Зведений по об'єктах (${objectNames.length})`,
+        single ? `🏗️ Звіт по об'єкту: ${objectNames[0]}` : `🏗️ Звіт по об'єктах (${objectNames.length}): ${shortNames}`,
         `📅 ${formatDateUA(from)} – ${formatDateUA(to)}`,
-        `🏗️ ${shortNames}`,
         `Техніки: ${new Set(confirmed.map(r => r.equipment_id)).size} · підтверджених звітів: ${confirmed.length}`,
         `Мотогодини: ${fmtNum(sum(confirmed, 'total_moto_hours'))} · людиногодини: ${fmtNum(sum(confirmed, 'total_person_hours'))}`,
         other.length ? `⏳ Не підтверджено (окремий аркуш): ${other.length}` : ''
@@ -368,7 +237,7 @@ function exportMultiObjectExcel(btn, user, sel, objectNames, from, to) {
   });
 }
 
-// Книга "Зведений по об'єктах" (оформлена, xl*-функції з admin.js)
+// Книга "Звіт по об'єкту" обліковця (оформлена, xl*-функції з admin.js)
 function buildMultiObjectWorkbook(ExcelJS, { confirmed, other, objectNames, from, to }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'НАБ ТехОблік';
@@ -400,7 +269,7 @@ function buildMultiObjectWorkbook(ExcelJS, { confirmed, other, objectNames, from
   const eqRows = Array.from(byEq.values()).sort((a, b) => a.name.localeCompare(b.name, 'uk'));
 
   xlStyledSheet(wb, 'Техніка', {
-    title: "Зведений по об'єктах — техніка",
+    title: "Звіт по об'єкту — техніка (зведено)",
     subtitle,
     note: `${note} · одна техніка = один рядок · лише підтверджені звіти`,
     columns: [
@@ -434,7 +303,7 @@ function buildMultiObjectWorkbook(ExcelJS, { confirmed, other, objectNames, from
   const objRows = Array.from(byObj.values()).sort((a, b) => a.name.localeCompare(b.name, 'uk'));
 
   xlStyledSheet(wb, "По об'єктах", {
-    title: "Зведений по об'єктах — по об'єктах",
+    title: "Звіт по об'єкту — по об'єктах",
     subtitle: "Скільки техніки й годин на кожному об'єкті",
     note: `${note} · лише підтверджені звіти`,
     columns: [
@@ -465,7 +334,7 @@ function buildMultiObjectWorkbook(ExcelJS, { confirmed, other, objectNames, from
   ];
 
   xlStyledSheet(wb, 'Звіти', {
-    title: "Зведений по об'єктах — підтверджені звіти",
+    title: "Звіт по об'єкту — підтверджені звіти",
     subtitle: 'Кожен звіт окремим рядком',
     note,
     columns: reportColumns,
@@ -476,7 +345,7 @@ function buildMultiObjectWorkbook(ExcelJS, { confirmed, other, objectNames, from
 
   if (other.length > 0) {
     xlStyledSheet(wb, 'Не підтверджені', {
-      title: "Зведений по об'єктах — не підтверджені звіти",
+      title: "Звіт по об'єкту — не підтверджені звіти",
       subtitle: 'Чернетки, очікують відповідального, повернені на коригування — у підсумки не входять',
       note,
       columns: reportColumns,
