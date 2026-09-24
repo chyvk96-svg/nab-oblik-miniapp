@@ -215,8 +215,9 @@ async function fetchLatestRejectionComments(reportIds) {
 // Той самий екран використовує адміністратор ("Години оператора" в admin.js):
 // renderHoursScreen({ viewer, subject, onBack }) — viewer (хто дивиться)
 // отримує файл у бот, subject — чиї години (export_files.subject_user_id).
-// Використовує спільні з admin.js: isoDateLocal, fmtNum, loadXlsxLib, xNum,
-// XLSX_MIME (admin.js підключений на сторінці для всіх ролей).
+// Використовує спільні з admin.js: isoDateLocal, fmtNum, loadExcelJsLib,
+// xlNewSheet / xlTable / xlFinishSheet / xlSectionTitle, XLSX_MIME
+// (admin.js підключений на сторінці для всіх ролей).
 
 const HOURS_CONFIRMED_STATUS = 'Фінально підтверджено';
 const HOURS_PENDING_STATUSES = ['Очікує відповідального', 'Повернено на коригування'];
@@ -451,49 +452,73 @@ function exportUuid() {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-function buildHoursWorkbook(XLSX, user, from, to, confirmed, pending, totals) {
-  const rowOf = (r, withStatus) => {
-    const row = [
-      formatDateUA(r.work_date),
-      r.objects?.name || '',
-      r.equipment?.name || '',
-      xNum(r.total_person_hours),
-      xNum(r.travel_hours) || null,
-      xNum(r.transport_hours) || null
-    ];
-    if (withStatus) row.push(r.status);
-    return row;
-  };
+// Відомість годин (оформлена, ExcelJS; спільні xlNewSheet / xlTable /
+// xlFinishSheet з admin.js): аркуш "Години" — підтверджені звіти з рядком
+// "РАЗОМ" і кількістю робочих днів; нижче окремою таблицею — "Ще не
+// зараховано" (у "РАЗОМ" не входить).
+function buildHoursWorkbook(ExcelJS, user, from, to, confirmed, pending, totals) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'НАБ ТехОблік';
+  wb.created = new Date();
 
-  const header = ['Дата', "Об'єкт", 'Техніка', 'Людиногодини', 'Перебазування, год', 'Перевезення людей, год'];
-
-  const aoa = [
-    [`Відомість годин: ${user.full_name}`],
-    [`Період: ${formatDateUA(from)} – ${formatDateUA(to)}`],
-    [`Сформовано: ${formatDateTimeUA(new Date().toISOString())} (лише звіти "Фінально підтверджено")`],
-    [],
-    header
+  const baseColumns = [
+    { header: 'Дата', width: 12, type: 'date', get: r => r.work_date },
+    { header: "Об'єкт", width: 38, type: 'long', get: r => r.objects?.name || '' },
+    { header: 'Техніка', width: 26, type: 'name', get: r => r.equipment?.name || '' },
+    { header: 'Людиногодини', width: 13, type: 'hours', get: r => r.total_person_hours, total: true },
+    { header: 'Перебазування, год', width: 15, type: 'hours', get: r => r.travel_hours, total: true },
+    { header: 'Перевезення людей, год', width: 15, type: 'hours', get: r => r.transport_hours, total: true }
   ];
-  confirmed.forEach(r => aoa.push(rowOf(r, false)));
-  if (confirmed.length === 0) aoa.push(['Підтверджених звітів за цей період немає']);
-  aoa.push([]);
-  aoa.push(['РАЗОМ', '', '', totals.person, totals.travel, totals.transport]);
-  aoa.push(['Робочих днів', '', '', totals.days]);
+  const pendingColumns = baseColumns.concat([
+    { header: 'Статус', width: 23, type: 'status', get: r => r.status }
+  ]);
 
-  if (pending.length > 0) {
-    aoa.push([]);
-    aoa.push(['ЩЕ НЕ ЗАРАХОВАНО (не входить у "Разом")']);
-    aoa.push(header.concat(['Статус']));
-    pending.forEach(r => aoa.push(rowOf(r, true)));
-    aoa.push(['Разом не зараховано', '', '', totals.pendingPerson]);
+  const { ws, nextRow } = xlNewSheet(wb, 'Години', {
+    title: `Відомість годин: ${user.full_name}`,
+    subtitle: `Період: ${formatDateUA(from)} – ${formatDateUA(to)}`,
+    note: 'лише звіти "Фінально підтверджено"'
+  });
+  ws.columns = pendingColumns.map(c => ({ width: c.width }));
+
+  const t = xlTable(ws, nextRow, {
+    columns: baseColumns,
+    rows: confirmed,
+    totalsLabel: 'РАЗОМ',
+    emptyText: 'Підтверджених звітів за цей період немає'
+  });
+
+  // Робочих днів — під рядком "РАЗОМ"
+  let row = t.nextRow;
+  if (confirmed.length > 0) {
+    const cellLabel = ws.getCell(row, 1);
+    cellLabel.value = 'Робочих днів';
+    const cellValue = ws.getCell(row, 4);
+    cellValue.value = totals.days;
+    cellValue.numFmt = '0';
+    [cellLabel, cellValue].forEach(c => {
+      c.font = { name: 'Calibri', size: 10, bold: true };
+      c.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+    row += 1;
   }
 
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = [
-    { wch: 12 }, { wch: 40 }, { wch: 28 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 26 }
-  ];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Години');
+  xlFinishSheet(ws, {
+    headerRow: t.headerRow,
+    lastDataRow: confirmed.length ? t.lastDataRow : t.headerRow,
+    colCount: baseColumns.length,
+    filter: false
+  });
+
+  if (pending.length > 0) {
+    row += 1;
+    xlSectionTitle(ws, row, `Ще не зараховано (${pending.length}) — у "РАЗОМ" не входить`);
+    xlTable(ws, row + 1, {
+      columns: pendingColumns,
+      rows: pending,
+      totalsLabel: 'РАЗОМ'
+    });
+  }
+
   return wb;
 }
 
@@ -518,9 +543,9 @@ async function sendHoursToTelegram(btn, viewer, subject, from, to, confirmed, pe
   btn.textContent = 'Формування файлу...';
 
   try {
-    const XLSX = await loadXlsxLib();
-    const wb = buildHoursWorkbook(XLSX, subject, from, to, confirmed, pending, totals);
-    const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const ExcelJS = await loadExcelJsLib();
+    const wb = buildHoursWorkbook(ExcelJS, subject, from, to, confirmed, pending, totals);
+    const buffer = await wb.xlsx.writeBuffer();
 
     const fileName = `Hodyny_${subject.id}_${from}_${to}.xlsx`;
     const path = `${exportUuid()}/${fileName}`;
