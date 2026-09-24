@@ -725,94 +725,204 @@ async function toggleWialonDaily(btn, from, to) {
 }
 
 // ======================================================
-// ЗВІТ ПО ОБ'ЄКТУ (адміністратор і обліковець — див. accountant.js)
+// ЗВІТ ПО ОБ'ЄКТУ (адміністратор; один або кілька об'єктів, 2026-09-24)
 // Лише дані звітів операторів — Wialon про об'єкти не знає.
+// Період → список об'єктів, де за період є звіти (крім чернеток), галочками →
+// картка "Разом" + картки "об'єкт · техніка · оператор" → повний Excel.
+// Непідтверджені звіти входять у підсумки (статус видно в "Звітах").
+// Обліковець має власний екран (accountant.js).
 // ======================================================
+
+const OBJREP_SELECT =
+  'id,work_date,status,object_id,objects(id,name,customers(name)),customer_name,' +
+  'equipment_id,equipment(name),operator_id,users!daily_reports_operator_id_fkey(full_name),' +
+  'start_hours,end_hours,total_moto_hours,start_km,end_km,total_km,start_time,end_time,lunch_hours,total_person_hours,' +
+  'travel_hours,travel_route,transport_hours,transport_route,downtime_hours,downtime_reason,fueling_liters,fueling_source,' +
+  'has_breakdown,breakdown_description,repair_hours,operator_note';
+
+function objectLabel(obj) {
+  if (!obj) return '—';
+  return obj.customers?.name ? `${obj.name} (${obj.customers.name})` : obj.name;
+}
+
+// Групування звітів: об'єкт + техніка + оператор (як функція object_report
+// у базі, але по кількох об'єктах одразу)
+function groupObjectReportRows(reports) {
+  const groups = new Map();
+  reports.forEach(r => {
+    const key = `${r.object_id}|${r.equipment_id}|${r.operator_id}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        object_id: r.object_id,
+        object_name: objectLabel(r.objects),
+        equipment_id: r.equipment_id,
+        equipment_name: r.equipment?.name || '',
+        operator_id: r.operator_id,
+        operator_name: r.users?.full_name || '',
+        dates: new Set(),
+        first_date: r.work_date,
+        last_date: r.work_date,
+        reports_count: 0,
+        confirmed_count: 0,
+        moto_hours: 0,
+        km: null,
+        person_hours: 0,
+        travel_hours: 0,
+        transport_hours: 0,
+        downtime_hours: 0,
+        repair_hours: 0,
+        fueling_liters: 0,
+        breakdowns_count: 0
+      });
+    }
+    const g = groups.get(key);
+    const n = v => Number(v) || 0;
+    g.dates.add(r.work_date);
+    if (r.work_date < g.first_date) g.first_date = r.work_date;
+    if (r.work_date > g.last_date) g.last_date = r.work_date;
+    g.reports_count += 1;
+    if (r.status === 'Фінально підтверджено') g.confirmed_count += 1;
+    g.moto_hours += n(r.total_moto_hours);
+    if (r.total_km !== null && r.total_km !== undefined) g.km = (g.km || 0) + n(r.total_km);
+    g.person_hours += n(r.total_person_hours);
+    g.travel_hours += n(r.travel_hours);
+    g.transport_hours += n(r.transport_hours);
+    g.downtime_hours += n(r.downtime_hours);
+    g.repair_hours += n(r.repair_hours);
+    g.fueling_liters += n(r.fueling_liters);
+    if (r.has_breakdown) g.breakdowns_count += 1;
+  });
+  const r2 = v => v === null ? null : Math.round(v * 100) / 100;
+  return Array.from(groups.values()).map(g => ({
+    ...g,
+    work_days: g.dates.size,
+    moto_hours: r2(g.moto_hours),
+    km: g.km === null ? null : Math.round(g.km * 10) / 10,
+    person_hours: r2(g.person_hours),
+    travel_hours: r2(g.travel_hours),
+    transport_hours: r2(g.transport_hours),
+    downtime_hours: r2(g.downtime_hours),
+    repair_hours: r2(g.repair_hours),
+    fueling_liters: Math.round(g.fueling_liters * 10) / 10
+  })).sort((a, b) =>
+    a.object_name.localeCompare(b.object_name, 'uk') ||
+    a.equipment_name.localeCompare(b.equipment_name, 'uk') ||
+    a.operator_name.localeCompare(b.operator_name, 'uk'));
+}
 
 async function renderObjectReport(user) {
   app.innerHTML = `
     ${topbarHtml("Звіт по об'єкту", roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-menu-objrep" style="margin:0 0 14px">← Назад до меню</div>
+      ${periodPickerHtml('or')}
       <div id="objrep-body" class="msg">Завантаження...</div>
     </div>
   `;
   document.getElementById('back-to-menu-objrep').addEventListener('click', () => backToRoleMenu(user));
 
-  const bodyEl = document.getElementById('objrep-body');
-
-  let objectsList;
-  try {
-    objectsList = await supaGet('objects', 'select=id,name,status,customers(name)&order=status.asc,name.asc');
-  } catch (e) {
-    bodyEl.textContent = 'Помилка завантаження: ' + e.message;
-    return;
-  }
-
-  if (!objectsList || objectsList.length === 0) {
-    bodyEl.textContent = "Об'єктів ще немає.";
-    return;
-  }
-
-  bodyEl.className = '';
-  bodyEl.innerHTML = `
-    <div class="section" style="padding-bottom:4px;margin-bottom:0">
-      <label>Об'єкт</label>
-      <select id="objrep-object">
-        ${objectsList.map(o => `<option value="${o.id}">${o.name}${o.customers?.name ? ` (${o.customers.name})` : ''}${o.status !== 'Активний' ? ' — закритий' : ''}</option>`).join('')}
-      </select>
-    </div>
-    ${periodPickerHtml('or')}
-    <div id="objrep-result" class="msg">Завантаження...</div>
-  `;
-
-  const objectSelect = document.getElementById('objrep-object');
-  let lastPeriod = null;
-
-  const show = (from, to) => {
-    lastPeriod = { from, to };
-    loadObjectReport(user, objectSelect.value, objectSelect.options[objectSelect.selectedIndex].text, from, to);
-  };
-
-  objectSelect.addEventListener('change', () => {
-    if (lastPeriod) show(lastPeriod.from, lastPeriod.to);
-  });
-
-  wirePeriodPicker('or', show);
+  wirePeriodPicker('or', (from, to) => loadObjectReportPeriod(user, from, to));
 }
 
 let objectLoadSeq = 0;
 
-async function loadObjectReport(user, objectId, objectName, from, to) {
-  const resEl = document.getElementById('objrep-result');
+async function loadObjectReportPeriod(user, from, to) {
+  const bodyEl = document.getElementById('objrep-body');
+  if (!bodyEl) return;
   const seq = ++objectLoadSeq;
-  resEl.className = 'msg';
-  resEl.textContent = 'Завантаження...';
+  bodyEl.className = 'msg';
+  bodyEl.textContent = 'Завантаження...';
 
-  let rows;
+  let reports;
   try {
-    rows = await supaRpc('object_report', { p_object_id: objectId, p_from: from, p_to: to });
+    reports = await supaGet(
+      'daily_reports',
+      `work_date=gte.${from}&work_date=lte.${to}&status=neq.Чернетка&select=${OBJREP_SELECT}&order=work_date.asc`
+    );
   } catch (e) {
     if (seq !== objectLoadSeq) return;
-    resEl.textContent = 'Помилка завантаження: ' + e.message;
+    bodyEl.textContent = 'Помилка завантаження: ' + e.message;
     return;
   }
   if (seq !== objectLoadSeq) return;
 
-  if (!rows || rows.length === 0) {
-    resEl.textContent = `По об'єкту "${objectName}" за ${formatDateUA(from)} – ${formatDateUA(to)} звітів немає.`;
+  const list = reports || [];
+  if (list.length === 0) {
+    bodyEl.textContent = `За ${formatDateUA(from)} – ${formatDateUA(to)} звітів немає.`;
     return;
   }
 
+  // Об'єкти, де за період є звіти
+  const objMap = new Map();
+  list.forEach(r => {
+    const id = r.object_id || '—';
+    if (!objMap.has(id)) objMap.set(id, { id, name: objectLabel(r.objects), count: 0, confirmed: 0 });
+    const o = objMap.get(id);
+    o.count += 1;
+    if (r.status === 'Фінально підтверджено') o.confirmed += 1;
+  });
+  const objects = Array.from(objMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'uk'));
+
+  bodyEl.className = '';
+  bodyEl.innerHTML = `
+    <div class="section" style="padding-bottom:8px;margin-top:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="font-size:12.5px;color:var(--ink-soft)">Об'єкти з роботами (${objects.length}):</span>
+        <button type="button" class="btn-reject" id="or-toggle-all" style="flex:0 0 auto;padding:6px 10px">Зняти всі</button>
+      </div>
+      ${objects.map(o => `
+        <label class="checkbox-row" style="margin:0;padding:8px 0;cursor:pointer">
+          <input type="checkbox" class="or-obj" value="${escHtml(o.id)}" checked>
+          <span style="color:var(--ink);font-size:14px">
+            ${escHtml(o.name)}
+            <span style="display:block;font-size:11.5px;color:var(--ink-soft)">звітів: ${o.count} (підтверджено ${o.confirmed})</span>
+          </span>
+        </label>
+      `).join('')}
+    </div>
+    <div id="objrep-result"></div>
+  `;
+
+  const checks = () => Array.from(bodyEl.querySelectorAll('.or-obj'));
+  const toggleBtn = document.getElementById('or-toggle-all');
+
+  const refresh = () => {
+    const ids = new Set(checks().filter(c => c.checked).map(c => c.value));
+    toggleBtn.textContent = checks().every(c => c.checked) ? 'Зняти всі' : 'Вибрати всі';
+    const chosen = objects.filter(o => ids.has(o.id));
+    const sel = list.filter(r => ids.has(r.object_id || '—'));
+    renderObjectReportResult(user, chosen, sel, from, to);
+  };
+
+  checks().forEach(c => c.addEventListener('change', refresh));
+  toggleBtn.addEventListener('click', () => {
+    const allChecked = checks().every(c => c.checked);
+    checks().forEach(c => { c.checked = !allChecked; });
+    refresh();
+  });
+  refresh();
+}
+
+function renderObjectReportResult(user, chosen, reports, from, to) {
+  const resEl = document.getElementById('objrep-result');
+  if (!resEl) return;
+
+  if (chosen.length === 0) {
+    resEl.innerHTML = `<div class="hint-inline" style="margin:4px 0 14px">Виберіть хоча б один об'єкт.</div>`;
+    return;
+  }
+
+  const rows = groupObjectReportRows(reports);
   const sum = (key) => rows.reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
   const kmRows = rows.filter(r => r.km !== null);
   const allDates = rows.flatMap(r => [r.first_date, r.last_date]).sort();
+  const title = chosen.length === 1 ? chosen[0].name : `Об'єктів: ${chosen.length}`;
+  const multi = chosen.length > 1;
 
-  resEl.className = '';
   resEl.innerHTML = `
     <div class="report-card" style="border-left-color:var(--brand-yellow)">
       <div class="top-row">
-        <span class="date">${objectName}</span>
+        <span class="date">${escHtml(title)}</span>
         <span class="status-chip status-final">Разом</span>
       </div>
       <div class="meta">${formatDateUA(from)} – ${formatDateUA(to)} · фактично ${formatDateUA(allDates[0])} – ${formatDateUA(allDates[allDates.length - 1])}</div>
@@ -832,10 +942,11 @@ async function loadObjectReport(user, objectId, objectName, from, to) {
     ${rows.map(r => `
       <div class="report-card">
         <div class="top-row">
-          <span class="date">${r.equipment_name || '—'}</span>
+          <span class="date">${escHtml(r.equipment_name || '—')}</span>
           <span class="meta">${r.work_days} дн.</span>
         </div>
-        <div class="operator-name">${r.operator_name || '—'}</div>
+        <div class="operator-name">${escHtml(r.operator_name || '—')}</div>
+        ${multi ? `<div class="meta">🏗️ ${escHtml(r.object_name)}</div>` : ''}
         <div class="meta">${formatDateUA(r.first_date)} – ${formatDateUA(r.last_date)} · звітів ${r.reports_count} (підтверджено ${r.confirmed_count})</div>
         <div class="detail-row">Мотогодини: <b>${fmtNum(r.moto_hours)}</b>${r.km !== null ? ` · пробіг: <b>${fmtNum(r.km, 1)}</b> км` : ''}</div>
         <div class="detail-row">Людиногодини: <b>${fmtNum(r.person_hours)}</b></div>
@@ -847,7 +958,7 @@ async function loadObjectReport(user, objectId, objectName, from, to) {
   `;
 
   const excelBtn = document.getElementById('or-excel-btn');
-  excelBtn.addEventListener('click', () => exportObjectExcel(excelBtn, user, objectId, objectName, rows, from, to));
+  excelBtn.addEventListener('click', () => exportObjectExcel(excelBtn, user, chosen, rows, reports, from, to));
 }
 
 // ======================================================
@@ -1263,38 +1374,26 @@ function buildWialonWorkbook(ExcelJS, { rows, dailyRows, from, to }) {
 // ---------- Excel: звіт по об'єкту ----------
 // Аркуші: "Разом" (підсумок об'єкта), "Техніка й оператори" (те саме, що
 // картки на екрані), "Звіти" — кожен звіт окремим рядком.
-function exportObjectExcel(btn, user, objectId, objectName, rows, from, to) {
-  // Обліковець отримує скорочений формат (accountant.js)
-  if (user.role === 'Обліковець') {
-    exportObjectExcelAccountant(btn, user, objectId, objectName, from, to);
-    return;
-  }
+function exportObjectExcel(btn, user, chosen, rows, reports, from, to) {
   runExport(btn, async () => {
     const ExcelJS = await loadExcelJsLib();
-
-    // Усі звіти об'єкта за період (крім чернеток), кожен окремим рядком
-    const reports = await supaGet(
-      'daily_reports',
-      `object_id=eq.${objectId}&work_date=gte.${from}&work_date=lte.${to}&status=neq.Чернетка` +
-      `&select=id,work_date,status,customer_name,equipment(name),users!daily_reports_operator_id_fkey(full_name),` +
-      `start_hours,end_hours,total_moto_hours,start_km,end_km,total_km,start_time,end_time,lunch_hours,total_person_hours,` +
-      `travel_hours,travel_route,transport_hours,transport_route,downtime_hours,downtime_reason,fueling_liters,fueling_source,` +
-      `has_breakdown,breakdown_description,repair_hours,operator_note` +
-      `&order=work_date.asc`
-    );
-
-    const wb = buildObjectReportWorkbook(ExcelJS, { objectName, from, to, rows, reports: reports || [] });
+    const objectNames = chosen.map(o => o.name);
+    const wb = buildObjectReportWorkbook(ExcelJS, { objectNames, from, to, rows, reports });
     const buffer = await wb.xlsx.writeBuffer();
 
+    const single = chosen.length === 1;
     const sum = (key) => rows.reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
+    const shortNames = objectNames.length <= 3 ? objectNames.join('; ') : `${objectNames.slice(0, 3).join('; ')} … (+${objectNames.length - 3})`;
     await sendXlsxBufferToBot(buffer, {
-      fileName: `Zvit_obiekt_${String(objectId).replace(/[^A-Za-z0-9_-]/g, '')}_${from}_${to}.xlsx`,
+      fileName: single
+        ? `Zvit_obiekt_${String(chosen[0].id).replace(/[^A-Za-z0-9_-]/g, '')}_${from}_${to}.xlsx`
+        : `Zvit_obiekty_${chosen.length}_${from}_${to}.xlsx`,
       viewer: user,
       exportType: "Звіт по об'єкту",
       from,
       to,
       caption: [
-        `🏗️ Звіт по об'єкту: ${objectName}`,
+        single ? `🏗️ Звіт по об'єкту: ${objectNames[0]}` : `🏗️ Звіт по об'єктах (${objectNames.length}): ${shortNames}`,
         `📅 ${formatDateUA(from)} – ${formatDateUA(to)}`,
         `Звітів: ${sum('reports_count')} (підтверджено ${sum('confirmed_count')})`,
         `Мотогодини: ${fmtNum(sum('moto_hours'))} · людиногодини: ${fmtNum(sum('person_hours'))}`,
@@ -1304,19 +1403,23 @@ function exportObjectExcel(btn, user, objectId, objectName, rows, from, to) {
   });
 }
 
-// Книга "Звіт по об'єкту" (адміністратор), оформлена: аркуші "Разом",
-// "Техніка й оператори", "Звіти". Чиста функція — без запитів до бази.
-function buildObjectReportWorkbook(ExcelJS, { objectName, from, to, rows, reports }) {
+// Книга "Звіт по об'єкту" (адміністратор), оформлена: "Разом",
+// "По об'єктах" (якщо об'єктів кілька), "Техніка й оператори", "Звіти".
+// Чиста функція — без запитів до бази.
+function buildObjectReportWorkbook(ExcelJS, { objectNames, from, to, rows, reports }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'НАБ ТехОблік';
   wb.created = new Date();
 
+  const multi = objectNames.length > 1;
   const sum = (key) => rows.reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
   const kmRows = rows.filter(r => r.km !== null && r.km !== undefined);
   const period = `Період: ${formatDateUA(from)} – ${formatDateUA(to)}`;
+  const subtitle = multi ? `Об'єкти (${objectNames.length}): ${objectNames.join('; ')}` : objectNames[0];
 
   // ---- Аркуш "Разом" ----
   const totalItems = [
+    { label: "Об'єктів", value: objectNames.length, type: 'int' },
     { label: 'Звітів', value: sum('reports_count'), type: 'int' },
     { label: 'Підтверджено', value: sum('confirmed_count'), type: 'int' },
     { label: 'Одиниць техніки', value: new Set(rows.map(r => r.equipment_id)).size, type: 'int' },
@@ -1333,23 +1436,62 @@ function buildObjectReportWorkbook(ExcelJS, { objectName, from, to, rows, report
   ];
   xlStyledSheet(wb, 'Разом', {
     title: "Звіт по об'єкту — разом",
-    subtitle: objectName,
+    subtitle,
     note: period,
     columns: [
       { header: 'Показник', width: 34, type: 'text', get: it => it.label, align: 'left' },
       { header: 'Значення', width: 18, get: it => it.value, typeOf: it => it.type }
     ],
-    rows: totalItems,
+    rows: multi ? totalItems : totalItems.slice(1),
     freezeCols: 0,
     showZeros: true
   });
 
+  // ---- Аркуш "По об'єктах" (лише якщо об'єктів кілька) ----
+  if (multi) {
+    const byObj = new Map();
+    rows.forEach(r => {
+      if (!byObj.has(r.object_id)) byObj.set(r.object_id, { name: r.object_name, eq: new Set(), ops: new Set(), reports: 0, confirmed: 0, moto: 0, person: 0, travel: 0, transport: 0, fuel: 0 });
+      const g = byObj.get(r.object_id);
+      g.eq.add(r.equipment_id);
+      g.ops.add(r.operator_id);
+      g.reports += r.reports_count;
+      g.confirmed += r.confirmed_count;
+      g.moto += Number(r.moto_hours) || 0;
+      g.person += Number(r.person_hours) || 0;
+      g.travel += Number(r.travel_hours) || 0;
+      g.transport += Number(r.transport_hours) || 0;
+      g.fuel += Number(r.fueling_liters) || 0;
+    });
+    xlStyledSheet(wb, "По об'єктах", {
+      title: "Звіт по об'єкту — по об'єктах",
+      subtitle,
+      note: period,
+      columns: [
+        { header: "Об'єкт (замовник)", width: 44, type: 'long', get: g => g.name },
+        { header: 'Одиниць техніки', width: 11, type: 'int', get: g => g.eq.size },
+        { header: 'Операторів', width: 11, type: 'int', get: g => g.ops.size },
+        { header: 'Звітів', width: 9, type: 'int', get: g => g.reports, total: true },
+        { header: 'Підтверджено', width: 13, type: 'int', get: g => g.confirmed, total: true },
+        { header: 'Мотогодини', width: 12, type: 'hours', get: g => g.moto, total: true },
+        { header: 'Людиногодини', width: 13, type: 'hours', get: g => g.person, total: true },
+        { header: 'Перебазування, год', width: 15, type: 'hours', get: g => g.travel, total: true },
+        { header: 'Перевезення людей, год', width: 13, type: 'hours', get: g => g.transport, total: true },
+        { header: 'Заправка, л', width: 11, type: 'liters', get: g => g.fuel, total: true }
+      ],
+      rows: Array.from(byObj.values()),
+      totalsLabel: 'РАЗОМ',
+      freezeCols: 1
+    });
+  }
+
   // ---- Аркуш "Техніка й оператори" ----
+  const objCol = multi ? [{ header: "Об'єкт (замовник)", width: 34, type: 'long', get: r => r.object_name }] : [];
   xlStyledSheet(wb, 'Техніка й оператори', {
     title: "Звіт по об'єкту — техніка й оператори",
-    subtitle: objectName,
+    subtitle,
     note: period,
-    columns: [
+    columns: objCol.concat([
       { header: 'Техніка', width: 26, type: 'name', get: r => r.equipment_name || '' },
       { header: 'Оператор', width: 26, type: 'name', get: r => r.operator_name || '' },
       { header: 'Перша дата', width: 12, type: 'date', get: r => r.first_date },
@@ -1366,21 +1508,23 @@ function buildObjectReportWorkbook(ExcelJS, { objectName, from, to, rows, report
       { header: 'Ремонт, год', width: 10, type: 'hours', get: r => r.repair_hours, total: true },
       { header: 'Поломок', width: 9, type: 'int', get: r => r.breakdowns_count, total: true },
       { header: 'Заправка, л', width: 11, type: 'liters', get: r => r.fueling_liters, total: true }
-    ],
+    ]),
     rows,
     totalsLabel: 'РАЗОМ',
-    freezeCols: 2
+    freezeCols: multi ? 1 : 2
   });
 
   // ---- Аркуш "Звіти" ----
+  const objColReports = multi ? [{ header: "Об'єкт (замовник)", width: 34, type: 'long', get: r => objectLabel(r.objects) }] : [];
   xlStyledSheet(wb, 'Звіти', {
     title: "Звіт по об'єкту — усі звіти",
-    subtitle: objectName,
+    subtitle,
     note: `${period} · чернетки не включено`,
     columns: [
       { header: 'Дата', width: 11, type: 'date', get: r => r.work_date },
       { header: 'Звіт', width: 10, type: 'text', get: r => r.id },
-      { header: 'Статус', width: 23, type: 'status', get: r => r.status },
+      { header: 'Статус', width: 23, type: 'status', get: r => r.status }
+    ].concat(objColReports, [
       { header: 'Техніка', width: 24, type: 'name', get: r => r.equipment?.name || '' },
       { header: 'Оператор', width: 24, type: 'name', get: r => r.users?.full_name || '' },
       { header: 'Замовник', width: 20, type: 'name', get: r => r.customer_name || '' },
@@ -1406,7 +1550,7 @@ function buildObjectReportWorkbook(ExcelJS, { objectName, from, to, rows, report
       { header: 'Опис поломки', width: 30, type: 'long', get: r => r.breakdown_description || '' },
       { header: 'Ремонт, год', width: 10, type: 'hours', get: r => r.repair_hours, total: true },
       { header: 'Примітка', width: 30, type: 'long', get: r => r.operator_note || '' }
-    ],
+    ]),
     rows: reports,
     totalsLabel: 'РАЗОМ',
     freezeCols: 1
