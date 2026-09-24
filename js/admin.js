@@ -3,6 +3,8 @@
 // goToRoleHome(), renderPendingApprovals(), renderApprovalHistory(), renderAddObject(),
 // renderManageObjects() з responsible.js, а також renderUserList(), renderEquipmentList(),
 // renderCustomersList() з admin-manage.js (усі файли вже завантажені у сторінку).
+// Екрани "Непідтверджені звіти", "Усі закриті звіти", "Звіт по об'єкту" спільні
+// з обліковцем: їхня кнопка "Назад" — backToRoleMenu(user) з accountant.js.
 // Адміністратор може бути призначений відповідальним за окремі (зазвичай приватні)
 // об'єкти — тоді "Мої підтвердження"/"Історія" показують саме ці звіти.
 
@@ -343,7 +345,7 @@ async function renderAdminPendingReports(user) {
       <div id="admin-pending-list" class="msg">Завантаження...</div>
     </div>
   `;
-  document.getElementById('back-to-menu-pending').addEventListener('click', () => renderAdminHome(user));
+  document.getElementById('back-to-menu-pending').addEventListener('click', () => backToRoleMenu(user));
 
   let reports;
   try {
@@ -385,7 +387,7 @@ async function renderAdminClosedReports(user) {
       <div id="admin-list" class="msg">Завантаження...</div>
     </div>
   `;
-  document.getElementById('back-to-menu-closed').addEventListener('click', () => renderAdminHome(user));
+  document.getElementById('back-to-menu-closed').addEventListener('click', () => backToRoleMenu(user));
 
   let reports;
   try {
@@ -723,7 +725,7 @@ async function toggleWialonDaily(btn, from, to) {
 }
 
 // ======================================================
-// ЗВІТ ПО ОБ'ЄКТУ (тільки адміністратор)
+// ЗВІТ ПО ОБ'ЄКТУ (адміністратор і обліковець — див. accountant.js)
 // Лише дані звітів операторів — Wialon про об'єкти не знає.
 // ======================================================
 
@@ -735,7 +737,7 @@ async function renderObjectReport(user) {
       <div id="objrep-body" class="msg">Завантаження...</div>
     </div>
   `;
-  document.getElementById('back-to-menu-objrep').addEventListener('click', () => renderAdminHome(user));
+  document.getElementById('back-to-menu-objrep').addEventListener('click', () => backToRoleMenu(user));
 
   const bodyEl = document.getElementById('objrep-body');
 
