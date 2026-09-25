@@ -211,6 +211,39 @@ async function renderAddObject(user) {
 
 // ---------- Об'єкти: закриття / відкриття ----------
 
+// Статуси об'єкта:
+//   "Активний"   — оператори бачать об'єкт у формі звіту;
+//   "Неактивний" — тимчасово призупинений: у формі звіту не показується,
+//                  дата завершення не ставиться (з 2026-09-25);
+//   "Закритий"   — роботи завершено: у формі не показується, end_date = сьогодні.
+// Форма оператора бере лише status = "Активний", тож і неактивні, і закриті
+// об'єкти оператор не бачить. Історичні звіти лишаються без змін.
+const OBJECT_STATUS_ORDER = { 'Активний': 0, 'Неактивний': 1, 'Закритий': 2 };
+
+function objectStatusChipClass(status) {
+  if (status === 'Активний') return 'status-final';
+  if (status === 'Неактивний') return 'status-wait';
+  return 'status-corr';
+}
+
+// Кнопки зміни статусу для картки об'єкта: [новий статус, підпис]
+function objectStatusActions(status) {
+  if (status === 'Активний') return [['Неактивний', 'Деактивувати'], ['Закритий', 'Закрити']];
+  if (status === 'Неактивний') return [['Активний', 'Активувати'], ['Закритий', 'Закрити']];
+  return [['Активний', 'Відкрити']];
+}
+
+// Текст підтвердження перед зміною статусу (null — без підтвердження)
+function objectStatusConfirmText(name, newStatus) {
+  if (newStatus === 'Неактивний') {
+    return `Деактивувати об'єкт «${name}»?\n\nОператори не бачитимуть його у формі звіту, доки ви його не активуєте. Звіти, вже подані по ньому, лишаються.`;
+  }
+  if (newStatus === 'Закритий') {
+    return `Закрити об'єкт «${name}»?\n\nРоботи на ньому завершено: дата завершення — сьогодні, оператори не бачитимуть його у формі звіту. Звіти, вже подані по ньому, лишаються.`;
+  }
+  return null;
+}
+
 async function renderManageObjects(user) {
   app.innerHTML = `
     ${topbarHtml("Об'єкти", roleSubtitle(user))}
@@ -227,7 +260,7 @@ async function renderManageObjects(user) {
   try {
     objectsList = await supaGet(
       'objects',
-      `select=id,name,short_name,status,customers(name)&order=status.asc,name.asc`
+      `select=id,name,short_name,status,customers(name)&order=name.asc`
     );
   } catch (e) {
     listEl.textContent = 'Помилка завантаження: ' + e.message;
@@ -239,19 +272,27 @@ async function renderManageObjects(user) {
     return;
   }
 
+  // Порядок: активні → неактивні → закриті, усередині — за назвою
+  objectsList.sort((a, b) => {
+    const sa = OBJECT_STATUS_ORDER[a.status] ?? 3;
+    const sb = OBJECT_STATUS_ORDER[b.status] ?? 3;
+    if (sa !== sb) return sa - sb;
+    return String(a.name).localeCompare(String(b.name), 'uk');
+  });
+
   listEl.className = '';
   listEl.innerHTML = objectsList.map(o => `
     <div class="report-card" id="obj-${o.id}">
       <div class="top-row">
         <span class="date">${o.name}</span>
-        <span class="status-chip ${o.status === 'Активний' ? 'status-final' : 'status-corr'}">${o.status}</span>
+        <span class="status-chip ${objectStatusChipClass(o.status)}">${o.status}</span>
       </div>
       <div class="meta">Замовник: ${o.customers?.name || '—'}</div>
       <div class="item-actions">
-        <button class="btn-confirm" data-edit-object="${o.id}">Редагувати</button>
-        <button class="btn-reject" data-object-id="${o.id}" data-current-status="${o.status}">
-          ${o.status === 'Активний' ? "Закрити" : "Відкрити"}
-        </button>
+        <button class="btn-confirm" data-edit-object="${o.id}" style="min-width:0; padding:10px 4px">Редагувати</button>
+        ${objectStatusActions(o.status).map(([newStatus, label]) => `
+          <button class="btn-reject" data-object-id="${o.id}" data-new-status="${newStatus}" style="min-width:0; padding:10px 4px">${label}</button>
+        `).join('')}
       </div>
     </div>
   `).join('');
@@ -262,7 +303,13 @@ async function renderManageObjects(user) {
 
   listEl.querySelectorAll('[data-object-id]').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const newStatus = btn.dataset.currentStatus === 'Активний' ? 'Закритий' : 'Активний';
+      const objectId = btn.dataset.objectId;
+      const newStatus = btn.dataset.newStatus;
+      const obj = objectsList.find(o => o.id === objectId);
+
+      const confirmText = objectStatusConfirmText(obj ? obj.name : objectId, newStatus);
+      if (confirmText && !confirm(confirmText)) return;
+
       const originalLabel = btn.textContent;
       btn.disabled = true;
       btn.textContent = 'Оновлення...';
@@ -270,10 +317,11 @@ async function renderManageObjects(user) {
         const updateData = { status: newStatus };
         if (newStatus === 'Закритий') {
           updateData.end_date = new Date().toISOString().slice(0, 10);
-        } else {
-          updateData.end_date = null;
+        } else if (newStatus === 'Активний') {
+          updateData.end_date = null;   // "Відкрити" / "Активувати" — дата завершення знімається
         }
-        await supaUpdate('objects', `id=eq.${btn.dataset.objectId}`, updateData);
+        // "Неактивний" — end_date не чіпаємо
+        await supaUpdate('objects', `id=eq.${objectId}`, updateData);
         renderManageObjects(user);
       } catch (e) {
         alert('Помилка: ' + e.message);
