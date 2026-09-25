@@ -594,7 +594,13 @@ async function sendHoursToTelegram(btn, viewer, subject, from, to, confirmed, pe
 // з якою оператор повернувся з екрана попереднього перегляду через "Редагувати"),
 // не впливає на isEdit/режим збереження.
 
-async function renderOperatorForm(user, existingReport = null, draftOverride = null, existingDraftId = null) {
+// adminCtx: { admin, onDone } — режим адміністратора (admin.js, "Редагувати"
+// в "Непідтверджених" / "Усіх закритих звітах"): user = оператор звіту;
+// доступна вся активна техніка й усі об'єкти; без перевірки розбіжності
+// мотогодин; при збереженні статус звіту НЕ змінюється (підтверджений
+// лишається підтвердженим), знімок старих даних — у report_edit_log
+// (edited_by = адмін); сповіщень немає (Make реагує лише на зміну статусу).
+async function renderOperatorForm(user, existingReport = null, draftOverride = null, existingDraftId = null, adminCtx = null) {
   const isDraftContinuation = existingReport !== null && existingReport.status === 'Чернетка';
   const isEdit = existingReport !== null && !isDraftContinuation;
   const prefill = draftOverride || existingReport;
@@ -607,11 +613,21 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   let myEquipment, objects;
 
   try {
-    myEquipment = await supaGet(
-      'user_equipment',
-      `user_id=eq.${user.id}&status=eq.Активна&select=equipment_id,equipment(id,name,confirmed_hours,tracks_moto_hours,confirmed_km,tracks_odometer)`
-    );
-    objects = await supaGet('objects', `status=eq.Активний&select=id,name,customer_id,customers(name)`);
+    if (adminCtx) {
+      // Адмін може виправити й техніку: вся активна + техніка самого звіту
+      const eqFields = 'id,name,confirmed_hours,tracks_moto_hours,confirmed_km,tracks_odometer';
+      const allEq = await supaGet('equipment', `select=${eqFields},status&order=name.asc`);
+      myEquipment = (allEq || [])
+        .filter(e => e.status === 'Активна' || (existingReport && e.id === existingReport.equipment_id))
+        .map(e => ({ equipment_id: e.id, equipment: e }));
+      objects = await supaGet('objects', `select=id,name,customer_id,customers(name),status&order=name.asc`);
+    } else {
+      myEquipment = await supaGet(
+        'user_equipment',
+        `user_id=eq.${user.id}&status=eq.Активна&select=equipment_id,equipment(id,name,confirmed_hours,tracks_moto_hours,confirmed_km,tracks_odometer)`
+      );
+      objects = await supaGet('objects', `status=eq.Активний&select=id,name,customer_id,customers(name)`);
+    }
   } catch (e) {
     renderMessage('Помилка завантаження довідників: ' + e.message);
     return;
@@ -636,7 +652,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   // Якщо це редагування раніше відхиленого звіту — підтягуємо причину коригування,
   // щоб оператор одразу бачив, що саме треба виправити.
   let rejectionComment = null;
-  if (isEdit) {
+  if (isEdit && !adminCtx) {
     const comments = await fetchLatestRejectionComments([existingReport.id]);
     rejectionComment = comments[existingReport.id] || null;
   }
@@ -651,12 +667,16 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     .join('');
 
   app.innerHTML = `
-    ${topbarHtml(isEdit ? 'Редагування звіту' : (isDraftContinuation ? 'Продовження чернетки' : 'Внести дані'), roleSubtitle(user))}
+    ${topbarHtml(
+      adminCtx ? `Редагування ${existingReport.id} (адмін)` : (isEdit ? 'Редагування звіту' : (isDraftContinuation ? 'Продовження чернетки' : 'Внести дані')),
+      adminCtx ? `Оператор: ${escHtml(user.full_name)} · статус: ${escHtml(existingReport.status)}` : roleSubtitle(user)
+    )}
     <div class="wrap">
-    <div class="back-link" id="back-to-menu-form" style="margin:14px 0 0">← Назад до меню</div>
+    <div class="back-link" id="back-to-menu-form" style="margin:14px 0 0">← ${adminCtx ? 'Назад без збереження' : 'Назад до меню'}</div>
+    ${adminCtx ? `<div class="hint-inline" style="margin-top:8px">Режим адміністратора: статус звіту не зміниться, оператор і відповідальний сповіщень не отримають. Старі дані збережуться в журналі коригувань.</div>` : ''}
     <div class="hint-inline" id="draft-save-status" style="margin-top:6px"></div>
     ${isDraftContinuation ? `<button type="button" id="delete-draft-btn" style="margin:4px 0 10px;background:none;border:1px solid var(--danger);color:var(--danger);padding:8px 14px;border-radius:4px;cursor:pointer">🗑 Видалити чернетку</button>` : ''}
-    ${isEdit ? `
+    ${isEdit && !adminCtx ? `
       <div class="discrepancy-box" style="margin-top:14px">
         <div class="flag">⚠ ПРИЧИНА ПОВЕРНЕННЯ НА КОРИГУВАННЯ</div>
         ${rejectionComment || 'Причину не вказано.'}
@@ -814,7 +834,8 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
 
   document.getElementById('back-to-menu-form').addEventListener('click', () => {
     clearTimeout(autosaveTimer);
-    renderOperatorHome(user);
+    if (adminCtx) adminCtx.onDone();
+    else renderOperatorHome(user);
   });
 
   document.getElementById('has_breakdown').addEventListener('change', (e) => {
@@ -882,7 +903,9 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     const suggested = parseFloat(startInput.dataset.suggested);
     const current = parseFloat(startInput.value);
     const box = document.getElementById('discrepancy-box');
-    const isDifferent = !isNaN(current) && !isNaN(suggested) && Math.abs(current - suggested) > HOURS_EPSILON;
+    // Адмін виправляє вже поданий звіт — розбіжність з поточними м/г техніки
+    // тут очікувана, причина не вимагається
+    const isDifferent = !adminCtx && !isNaN(current) && !isNaN(suggested) && Math.abs(current - suggested) > HOURS_EPSILON;
     box.classList.toggle('hidden', !isDifferent);
   }
 
@@ -1262,7 +1285,8 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       const equipmentName = myEquipment.find(ue => ue.equipment.id === payload.equipment_id)?.equipment.name || '—';
       const objectName = objects.find(o => o.id === payload.object_id)?.name || '—';
 
-      renderReportPreview(user, payload, isEdit, existingReport, equipmentName, objectName, currentDraftId);
+      if (adminCtx) payload.start_hours_note = startHoursNote ?? existingReport.start_hours_note ?? null;
+      renderReportPreview(user, payload, isEdit, existingReport, equipmentName, objectName, currentDraftId, adminCtx);
     } catch (err) {
       errorBox.textContent = err.message;
       errorBox.classList.remove('hidden');
@@ -1278,7 +1302,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
 // вже поданого звіту (визначає, робити supaUpdate чи supaInsert при підтвердженні).
 // equipmentName/objectName: назви для відображення (у payload лише id).
 
-function renderReportPreview(user, payload, isEdit, existingReport, equipmentName, objectName, draftId = null) {
+function renderReportPreview(user, payload, isEdit, existingReport, equipmentName, objectName, draftId = null, adminCtx = null) {
   const hasDraftRow = !isEdit && draftId !== null; // рядок-чернетка вже існує в БД — потрібен UPDATE, а не новий INSERT
   const totalMotoHours = (payload.start_hours !== null && payload.end_hours !== null)
     ? Math.round((payload.end_hours - payload.start_hours) * 100) / 100
@@ -1298,25 +1322,25 @@ function renderReportPreview(user, payload, isEdit, existingReport, equipmentNam
   };
 
   app.innerHTML = `
-    ${topbarHtml('Перевірка звіту', roleSubtitle(user))}
+    ${topbarHtml(adminCtx ? `Перевірка змін ${existingReport.id}` : 'Перевірка звіту', adminCtx ? `Оператор: ${escHtml(user.full_name)}` : roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-form-preview" style="margin:0 0 14px">← Назад до редагування</div>
       <div class="report-card">
         <div class="top-row">
           <span class="date">${formatDateUA(payload.work_date)}</span>
-          <span class="status-chip status-wait">Ще не відправлено</span>
+          <span class="status-chip status-wait">${adminCtx ? 'Ще не збережено' : 'Ще не відправлено'}</span>
         </div>
         ${reportDetailsHtml(displayReport)}
       </div>
       <div class="approval-actions">
         <button class="btn-reject" id="preview-edit-btn">Редагувати</button>
-        <button class="btn-confirm" id="preview-confirm-btn">Підтвердити і відправити</button>
+        <button class="btn-confirm" id="preview-confirm-btn">${adminCtx ? 'Зберегти зміни' : 'Підтвердити і відправити'}</button>
       </div>
       <div class="error-text hidden" id="preview-error-box"></div>
     </div>
   `;
 
-  const goBackToForm = () => renderOperatorForm(user, existingReport, payload, draftId);
+  const goBackToForm = () => renderOperatorForm(user, existingReport, payload, draftId, adminCtx);
   document.getElementById('back-to-form-preview').addEventListener('click', goBackToForm);
   document.getElementById('preview-edit-btn').addEventListener('click', goBackToForm);
 
@@ -1333,6 +1357,32 @@ function renderReportPreview(user, payload, isEdit, existingReport, equipmentNam
     try {
       let reportId;
       const dbPayload = { ...payload };
+
+      if (adminCtx) {
+        // Правка адміністратора: знімок у журнал, статус і дати погодження не змінюються
+        reportId = existingReport.id;
+        const editLogId = await supaRpc('next_id', { p_prefix: 'EDIT' });
+        await supaInsert('report_edit_log', {
+          id: editLogId,
+          report_id: reportId,
+          edited_by: adminCtx.admin.id,
+          old_data: existingReport
+        });
+        await supaUpdate('daily_reports', `id=eq.${reportId}`, dbPayload);
+
+        app.innerHTML = `
+          <div class="wrap">
+          <div class="success-box">
+            <div>✅ Зміни збережено</div>
+            <div class="stamp">${reportId}</div>
+            <div class="status">СТАТУС: ${escHtml(existingReport.status).toUpperCase()}</div>
+          </div>
+          <button type="button" id="back-home-btn" style="background:var(--asphalt);color:var(--brand-yellow);width:100%;padding:14px;border:none;border-radius:4px;font-family:'Oswald',sans-serif;font-weight:600;font-size:14px;text-transform:uppercase;letter-spacing:0.03em;cursor:pointer">Назад до списку</button>
+          </div>
+        `;
+        document.getElementById('back-home-btn').addEventListener('click', () => adminCtx.onDone());
+        return;
+      }
 
       if (isEdit) {
         reportId = existingReport.id;
@@ -1382,7 +1432,7 @@ function renderReportPreview(user, payload, isEdit, existingReport, equipmentNam
       errorBox.classList.remove('hidden');
       confirmBtn.disabled = false;
       editBtn.disabled = false;
-      confirmBtn.textContent = 'Підтвердити і відправити';
+      confirmBtn.textContent = adminCtx ? 'Зберегти зміни' : 'Підтвердити і відправити';
     }
   });
 }
