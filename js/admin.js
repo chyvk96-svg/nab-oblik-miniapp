@@ -331,11 +331,122 @@ async function renderAddUser(user) {
   });
 }
 
-// ---------- Непідтверджені звіти по всій компанії (тільки перегляд) ----------
+// ---------- Редагування / видалення звітів адміністратором (2026-09-24) ----------
+// У "Непідтверджених" і "Усіх закритих звітах" адмін (не обліковець) бачить
+// під кожним звітом "✏️ Редагувати" і "🗑 Видалити".
+// Редагування — форма оператора в режимі адміна (renderOperatorForm з
+// adminCtx, operator.js): статус не змінюється, сповіщень немає, знімок
+// старих даних — у report_edit_log.
+// Видалення — назавжди, разом із пов'язаними записами (погодження, журнал
+// коригувань, нагадування, поломки). Головне призначення — прибирати дублі.
+// Мотогодини/км техніки при цьому не перераховуються (рішення 2026-09-24).
+// Можливі дублі (той самий оператор, дата, техніка, мотогодини і час)
+// позначаються на картці.
+
+function isAdminUser(user) {
+  return user && user.role === 'Адміністратор';
+}
+
+// Ключ для пошуку дублів
+function reportDuplicateKey(r) {
+  return [r.users?.full_name, r.work_date, r.equipment_id, r.start_hours, r.end_hours, r.start_km, r.end_km, r.start_time, r.end_time].join('|');
+}
+
+function findDuplicateIds(reports) {
+  const byKey = new Map();
+  reports.forEach(r => {
+    const k = reportDuplicateKey(r);
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(r.id);
+  });
+  const dup = {};
+  byKey.forEach(ids => {
+    if (ids.length > 1) ids.forEach(id => { dup[id] = ids.filter(x => x !== id); });
+  });
+  return dup;
+}
+
+function adminReportCardHtml(r, user, duplicates) {
+  const dups = duplicates[r.id];
+  return `
+    <div class="report-card" data-report-card="${r.id}">
+      <div class="top-row">
+        <span class="date">${formatDateUA(r.work_date)} · ${r.id}</span>
+        <span class="status-chip ${statusChipClass(r.status)}">${r.status}</span>
+      </div>
+      ${dups ? `<div class="discrepancy-box" style="margin:6px 0 8px;padding:6px 10px"><div class="flag" style="margin:0">⚠ СХОЖЕ НА ДУБЛЬ: ${dups.join(', ')}</div></div>` : ''}
+      ${reportDetailsHtml(r)}
+      ${isAdminUser(user) ? `
+        <div class="approval-actions">
+          <button type="button" class="btn-confirm" data-admin-edit="${r.id}">✏️ Редагувати</button>
+          <button type="button" class="btn-reject" data-admin-delete="${r.id}">🗑 Видалити</button>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+// Підключає кнопки на картках; reload — перемалювати поточний екран
+function wireAdminReportActions(listEl, user, reports, reload) {
+  if (!isAdminUser(user)) return;
+
+  listEl.querySelectorAll('[data-admin-edit]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.adminEdit;
+      btn.disabled = true;
+      btn.textContent = 'Завантаження...';
+      try {
+        const rows = await supaGet('daily_reports', `id=eq.${id}&select=*`);
+        if (!rows || rows.length === 0) throw new Error('звіт не знайдено (можливо, вже видалений)');
+        const report = rows[0];
+        const ops = await supaGet('users', `id=eq.${report.operator_id}&select=id,full_name,role,status`);
+        const operator = (ops && ops[0]) || { id: report.operator_id, full_name: '—', role: 'Оператор' };
+        renderOperatorForm(operator, report, null, null, { admin: user, onDone: reload });
+      } catch (e) {
+        alert('Не вдалося відкрити звіт: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = '✏️ Редагувати';
+      }
+    });
+  });
+
+  listEl.querySelectorAll('[data-admin-delete]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.adminDelete;
+      const r = reports.find(x => x.id === id);
+      const what = r ? `${id} від ${formatDateUA(r.work_date)}\n${r.users?.full_name || ''} · ${r.equipment?.name || ''}\nСтатус: ${r.status}` : id;
+      if (!confirm(`Видалити звіт назавжди?\n\n${what}\n\nВідновити його буде неможливо.`)) return;
+      btn.disabled = true;
+      btn.textContent = 'Видалення...';
+      try {
+        await deleteReportCompletely(id);
+        const card = listEl.querySelector(`[data-report-card="${id}"]`);
+        if (card) card.remove();
+        if (!listEl.querySelector('[data-report-card]')) reload();
+      } catch (e) {
+        alert('Не вдалося видалити звіт: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = '🗑 Видалити';
+      }
+    });
+  });
+}
+
+// Видалення звіту разом із записами, що на нього посилаються
+async function deleteReportCompletely(reportId) {
+  const filter = `report_id=eq.${reportId}`;
+  await supaDelete('approvals', filter);
+  await supaDelete('report_edit_log', filter);
+  await supaDelete('events', filter);
+  await supaDelete('incidents', filter);
+  await supaDelete('daily_reports', `id=eq.${reportId}`);
+}
+
+// ---------- Непідтверджені звіти по всій компанії ----------
 // На відміну від "Мої підтвердження" (responsible.js) — показує звіти всіх
 // відповідальних, без прив'язки до того, чи адміністратор сам за них відповідає.
-// Тільки перегляд: підтвердити/повернути на коригування звідси не можна —
-// це лишається дією призначеного відповідального.
+// Підтвердити/повернути на коригування звідси не можна — це дія призначеного
+// відповідального. Адмін може редагувати й видаляти (див. вище).
 
 async function renderAdminPendingReports(user) {
   app.innerHTML = `
@@ -366,18 +477,12 @@ async function renderAdminPendingReports(user) {
   }
 
   listEl.className = '';
-  listEl.innerHTML = reports.map(r => `
-    <div class="report-card">
-      <div class="top-row">
-        <span class="date">${formatDateUA(r.work_date)}</span>
-        <span class="status-chip ${statusChipClass(r.status)}">${r.status}</span>
-      </div>
-      ${reportDetailsHtml(r)}
-    </div>
-  `).join('');
+  const duplicates = findDuplicateIds(reports);
+  listEl.innerHTML = reports.map(r => adminReportCardHtml(r, user, duplicates)).join('');
+  wireAdminReportActions(listEl, user, reports, () => renderAdminPendingReports(user));
 }
 
-// ---------- Усі закриті звіти по всій компанії (тільки перегляд) ----------
+// ---------- Усі закриті звіти по всій компанії ----------
 
 async function renderAdminClosedReports(user) {
   app.innerHTML = `
@@ -408,15 +513,9 @@ async function renderAdminClosedReports(user) {
   }
 
   listEl.className = '';
-  listEl.innerHTML = reports.map(r => `
-    <div class="report-card">
-      <div class="top-row">
-        <span class="date">${formatDateUA(r.work_date)}</span>
-        <span class="status-chip ${statusChipClass(r.status)}">${r.status}</span>
-      </div>
-      ${reportDetailsHtml(r)}
-    </div>
-  `).join('');
+  const duplicates = findDuplicateIds(reports);
+  listEl.innerHTML = reports.map(r => adminReportCardHtml(r, user, duplicates)).join('');
+  wireAdminReportActions(listEl, user, reports, () => renderAdminClosedReports(user));
 }
 
 // ======================================================
