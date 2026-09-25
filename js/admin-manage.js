@@ -430,7 +430,7 @@ async function renderEditEquipment(user, equipmentId) {
 
   let eq;
   try {
-    const rows = await supaGet('equipment', `id=eq.${equipmentId}&select=id,name,brand_model,reg_number,note,status,tracks_moto_hours,tracks_odometer,wialon_unit_id`);
+    const rows = await supaGet('equipment', `id=eq.${equipmentId}&select=id,name,brand_model,reg_number,note,status,tracks_moto_hours,tracks_odometer,wialon_unit_id,confirmed_hours,confirmed_km`);
     eq = rows && rows[0];
   } catch (e) {
     bodyEl.textContent = 'Помилка завантаження: ' + e.message;
@@ -467,11 +467,23 @@ async function renderEditEquipment(user, equipmentId) {
         </div>
         <div class="hint-inline">Зніми позначку для техніки без лічильника мотогодин (наприклад, водовозка) — тоді в звіті оператора поле мотогодин буде неактивне й необов'язкове.</div>
 
+        <div id="edit-eq-hours-block" class="${eq.tracks_moto_hours !== false ? '' : 'hidden'}">
+          <label>Підтверджені мотогодини (поточні)</label>
+          <input type="number" step="0.1" class="numeric" id="edit_eq_confirmed_hours" value="${eq.confirmed_hours ?? 0}">
+          <div class="hint-inline">Від цього значення оператор почне наступний звіт. Зазвичай оновлюється автоматично при підтвердженні звіту — змінюй вручну лише для початкового значення або виправлення.</div>
+        </div>
+
         <div class="checkbox-row">
           <input type="checkbox" id="edit_eq_tracks_odometer" ${eq.tracks_odometer ? 'checked' : ''}>
           <label for="edit_eq_tracks_odometer">Рахує кілометраж (спідометр)</label>
         </div>
         <div class="hint-inline">Познач для техніки зі справним спідометром — тоді в звіті зʼявиться поле показників спідометра.</div>
+
+        <div id="edit-eq-km-block" class="${eq.tracks_odometer ? '' : 'hidden'}">
+          <label>Підтверджені кілометри (поточні)</label>
+          <input type="number" step="0.1" class="numeric" id="edit_eq_confirmed_km" value="${eq.confirmed_km ?? 0}">
+          <div class="hint-inline">Від цього значення оператор почне наступний звіт (показник спідометра).</div>
+        </div>
 
         <label>Примітка</label>
         <textarea id="edit_eq_note">${eq.note || ''}</textarea>
@@ -485,6 +497,14 @@ async function renderEditEquipment(user, equipmentId) {
   const form = document.getElementById('edit-eq-form');
   const submitBtn = document.getElementById('edit-eq-submit-btn');
   const errorBox = document.getElementById('edit-eq-error-box');
+
+  // Поля підтверджених м/г і км показуються лише коли техніка їх рахує
+  document.getElementById('edit_eq_tracks_moto_hours').addEventListener('change', (e) => {
+    document.getElementById('edit-eq-hours-block').classList.toggle('hidden', !e.target.checked);
+  });
+  document.getElementById('edit_eq_tracks_odometer').addEventListener('change', (e) => {
+    document.getElementById('edit-eq-km-block').classList.toggle('hidden', !e.target.checked);
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -510,19 +530,41 @@ async function renderEditEquipment(user, equipmentId) {
       return;
     }
 
+    const update = {
+      name: name,
+      brand_model: brandModel || null,
+      reg_number: regNumber || null,
+      tracks_moto_hours: tracksMotoHours,
+      tracks_odometer: tracksOdometer,
+      wialon_unit_id: wialon.value,
+      note: note || null
+    };
+
+    // Підтверджені м/г і км — лише для техніки, що їх рахує
+    if (tracksMotoHours) {
+      const hours = parseFloat(document.getElementById('edit_eq_confirmed_hours').value);
+      if (isNaN(hours) || hours < 0) {
+        errorBox.textContent = 'Вкажи підтверджені мотогодини (число, не менше 0).';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+      update.confirmed_hours = hours;
+    }
+    if (tracksOdometer) {
+      const km = parseFloat(document.getElementById('edit_eq_confirmed_km').value);
+      if (isNaN(km) || km < 0) {
+        errorBox.textContent = 'Вкажи підтверджені кілометри (число, не менше 0).';
+        errorBox.classList.remove('hidden');
+        return;
+      }
+      update.confirmed_km = km;
+    }
+
     submitBtn.disabled = true;
     submitBtn.textContent = 'Збереження...';
 
     try {
-      await supaUpdate('equipment', `id=eq.${equipmentId}`, {
-        name: name,
-        brand_model: brandModel || null,
-        reg_number: regNumber || null,
-        tracks_moto_hours: tracksMotoHours,
-        tracks_odometer: tracksOdometer,
-        wialon_unit_id: wialon.value,
-        note: note || null
-      });
+      await supaUpdate('equipment', `id=eq.${equipmentId}`, update);
       renderEquipmentList(user);
     } catch (err) {
       errorBox.textContent = equipmentSaveErrorText(err);
