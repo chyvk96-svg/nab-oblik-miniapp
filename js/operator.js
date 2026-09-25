@@ -609,6 +609,12 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   // з'явитись сама, через автозбереження, ще до явного "Продовжити").
   let currentDraftId = isDraftContinuation ? existingReport.id : existingDraftId;
   let autosaveTimer = null;
+  // Черга збережень чернетки: наступне збереження стартує лише після
+  // завершення попереднього (інакше два паралельні збереження могли б
+  // створити ДВА рядки-чернетки). Перед переходом на екран перевірки форма
+  // чекає завершення черги — щоб currentDraftId був уже відомий і звіт
+  // подавався тим самим рядком, а не новим (причина дублів, 24.09).
+  let draftSaveChain = Promise.resolve();
 
   let myEquipment, objects;
 
@@ -1071,7 +1077,13 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     if (el) el.textContent = text;
   }
 
-  async function saveDraft() {
+  function saveDraft() {
+    const run = draftSaveChain.then(saveDraftNow);
+    draftSaveChain = run.catch(() => {});
+    return run;
+  }
+
+  async function saveDraftNow() {
     if (!document.getElementById('report-form')) return; // форму вже закрито/замінено іншим екраном
     const equipmentId = document.getElementById('equipment_id').value;
     const objectId = document.getElementById('object_id').value;
@@ -1293,6 +1305,10 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       const objectName = objects.find(o => o.id === payload.object_id)?.name || '—';
 
       if (adminCtx) payload.start_hours_note = startHoursNote ?? existingReport.start_hours_note ?? null;
+      // Дочекатись автозбереження, яке могло ще виконуватись у момент
+      // натискання, — тоді currentDraftId вже містить ID створеної чернетки.
+      clearTimeout(autosaveTimer);
+      await draftSaveChain;
       renderReportPreview(user, payload, isEdit, existingReport, equipmentName, objectName, currentDraftId, adminCtx);
     } catch (err) {
       errorBox.textContent = err.message;
@@ -1301,6 +1317,48 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       submitBtn.textContent = 'Перевірити звіт';
     }
   });
+}
+
+// ---------- Захист від дублів звітів ----------
+// Ключ "той самий звіт": оператор + дата + техніка + об'єкт.
+
+function sameReportFilter(operatorId, p) {
+  return `operator_id=eq.${encodeURIComponent(operatorId)}` +
+    `&work_date=eq.${encodeURIComponent(p.work_date)}` +
+    `&equipment_id=eq.${encodeURIComponent(p.equipment_id)}` +
+    `&object_id=eq.${encodeURIComponent(p.object_id)}`;
+}
+
+// Уже подані (не чернетки) звіти з тим самим ключем, крім ownId.
+async function findSimilarSubmittedReports(operatorId, p, ownId) {
+  try {
+    let q = `${sameReportFilter(operatorId, p)}&status=neq.Чернетка&select=id,status&order=id.asc`;
+    if (ownId) q += `&id=neq.${encodeURIComponent(ownId)}`;
+    return (await supaGet('daily_reports', q)) || [];
+  } catch (e) {
+    return []; // перевірка допоміжна — не блокує подачу
+  }
+}
+
+// Найстаріша чернетка з тим самим ключем (або null).
+async function findMatchingDraftId(operatorId, p) {
+  try {
+    const rows = await supaGet('daily_reports',
+      `${sameReportFilter(operatorId, p)}&status=eq.Чернетка&select=id&order=id.asc&limit=1`);
+    return rows && rows.length ? rows[0].id : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Видаляє чернетки з тим самим ключем, крім щойно поданого звіту.
+async function deleteLeftoverDrafts(operatorId, p, keepId) {
+  try {
+    await supaDelete('daily_reports',
+      `${sameReportFilter(operatorId, p)}&status=eq.Чернетка&id=neq.${encodeURIComponent(keepId)}`);
+  } catch (e) {
+    // не критично: звіт уже подано
+  }
 }
 
 // ---------- Екран перевірки звіту перед відправкою ----------
@@ -1391,6 +1449,32 @@ function renderReportPreview(user, payload, isEdit, existingReport, equipmentNam
         return;
       }
 
+      // Попередження про можливий дубль: уже поданий звіт цього оператора
+      // за ту саму дату на тій самій техніці й об'єкті (чернетки не рахуються).
+      const ownId = isEdit ? existingReport.id : draftId;
+      const similar = await findSimilarSubmittedReports(user.id, dbPayload, ownId);
+      if (similar.length) {
+        const list = similar.map(r => `${r.id} (${r.status})`).join(', ');
+        const goOn = confirm(
+          `Увага: за ${formatDateUA(dbPayload.work_date)} на цій техніці й об'єкті вже є звіт: ${list}.\n\n` +
+          `Це може бути дубль. Все одно відправити?`
+        );
+        if (!goOn) {
+          confirmBtn.disabled = false;
+          editBtn.disabled = false;
+          confirmBtn.textContent = 'Підтвердити і відправити';
+          return;
+        }
+      }
+
+      // Новий звіт без відомої чернетки: якщо в базі вже є чернетка з тими
+      // самими датою/технікою/об'єктом (напр. автозбереження, що завершилось
+      // пізніше), подаємо ЇЇ, а не створюємо ще один рядок.
+      let reuseDraftId = null;
+      if (!isEdit && !hasDraftRow) {
+        reuseDraftId = await findMatchingDraftId(user.id, dbPayload);
+      }
+
       if (isEdit) {
         reportId = existingReport.id;
 
@@ -1407,11 +1491,11 @@ function renderReportPreview(user, payload, isEdit, existingReport, equipmentNam
         dbPayload.final_closed_at = null;
 
         await supaUpdate('daily_reports', `id=eq.${reportId}`, dbPayload);
-      } else if (hasDraftRow) {
+      } else if (hasDraftRow || reuseDraftId) {
         // Чернетка (продовжена вручну або створена автозбереженням) перетворюється
         // на реально поданий звіт — той самий рядок, без запису в report_edit_log
         // (це не коригування відхиленого звіту).
-        reportId = draftId;
+        reportId = hasDraftRow ? draftId : reuseDraftId;
         dbPayload.status = 'Очікує відповідального';
         dbPayload.final_closed_at = null;
         dbPayload.submitted_at = new Date().toISOString();
@@ -1422,6 +1506,10 @@ function renderReportPreview(user, payload, isEdit, existingReport, equipmentNam
         dbPayload.id = reportId;
         await supaInsert('daily_reports', dbPayload);
       }
+
+      // Прибрати зайві чернетки з тими самими датою/технікою/об'єктом —
+      // інакше банер "Незавершені чернетки" запропонує подати звіт ще раз.
+      if (!isEdit) await deleteLeftoverDrafts(user.id, dbPayload, reportId);
 
       app.innerHTML = `
         <div class="wrap">
