@@ -529,7 +529,7 @@ function reportDetailsHtml(r) {
     ? `<div class="detail-row"><span class="label">Простій:</span> ${r.downtime_hours} год — ${r.downtime_reason || '—'}</div>`
     : '';
   const travelLine = (r.travel_hours && r.travel_hours > 0)
-    ? `<div class="detail-row"><span class="label">Переїзд:</span> ${r.travel_hours} год${r.travel_route ? ' — ' + r.travel_route : ''}</div>`
+    ? `<div class="detail-row"><span class="label">Перебазування техніки:</span> ${r.travel_hours} год${r.travel_route ? ' — ' + r.travel_route : ''}</div>`
     : '';
   const transportLine = r.transported_people
     ? `<div class="detail-row"><span class="label">Перевезення людей:</span> ${r.transport_hours || '—'} год${r.transport_route ? ' — ' + r.transport_route : ''}</div>`
