@@ -500,9 +500,10 @@ async function renderAdminClosedReports(user) {
       'daily_reports',
       `status=eq.Фінально підтверджено&select=${REPORT_SELECT_FIELDS}`
     );
-    // За номером звіту від меншого до більшого (REP-009 < REP-010 < REP-1000)
+    // За номером звіту: зверху найсвіжіший (найбільший номер), знизу найстаріший
+    // (числове порівняння: REP-1000 > REP-999 > REP-035)
     const repNum = id => parseInt(String(id).replace(/\D/g, ''), 10) || 0;
-    (reports || []).sort((a, b) => repNum(a.id) - repNum(b.id));
+    (reports || []).sort((a, b) => repNum(b.id) - repNum(a.id));
   } catch (e) {
     document.getElementById('admin-list').textContent = 'Помилка завантаження: ' + e.message;
     return;
