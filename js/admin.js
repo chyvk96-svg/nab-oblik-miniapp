@@ -1090,7 +1090,10 @@ function xlBorder() {
 // вільного рядка під заголовком (з відступом в один рядок).
 // wide — багато колонок: друк на 2 сторінки по ширині.
 function xlNewSheet(wb, name, { title, subtitle, note, wide = false }) {
-  const ws = wb.addWorksheet(name, {
+  // Прямий апостроф у назві аркуша ламає файл (Excel "відновлює" книгу:
+  // ExcelJS не екранує його в області друку) — замінюємо на типографський ’
+  const safeName = String(name).replace(/'/g, '\u2019').slice(0, 31);
+  const ws = wb.addWorksheet(safeName, {
     pageSetup: {
       orientation: 'landscape',
       paperSize: 9,             // A4
