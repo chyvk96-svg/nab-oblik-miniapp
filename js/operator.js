@@ -772,6 +772,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         <div class="section-title"><span class="n">5</span><span class="icon">🚗</span>Перебазування техніки</div>
         <label>Години</label>
         <input type="number" step="0.1" id="travel_hours" value="${prefill ? (prefill.travel_hours || 0) : '0'}">
+        <div class="hint-inline">Години перебазування оплачуються окремо й віднімаються від людиногодин (час роботи вказуй разом із дорогою).</div>
         <label>Опис маршруту</label>
         <input type="text" id="travel_route" placeholder="Звідки → куди" value="${prefill && prefill.travel_route ? prefill.travel_route : ''}">
       </div>
@@ -1244,12 +1245,18 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       const repairHours = hasBreakdown ? (parseFloat(document.getElementById('repair_hours')?.value) || 0) : 0;
       // Ремонт понад 30 хв повністю віднімається від загальних (людино)годин
       const repairDeduction = repairHours > 0.5 ? repairHours : 0;
+      // Перебазування техніки оплачується окремо: час роботи оператор вказує
+      // разом із дорогою, тому години перебазування віднімаються (2026-09-25)
+      const travelHours = parseFloat(document.getElementById('travel_hours').value) || 0;
 
       const [sh, sm] = startTime.split(':').map(Number);
       const [eh, em] = endTime.split(':').map(Number);
       let diffHours = (eh + em / 60) - (sh + sm / 60);
       if (diffHours < 0) diffHours += 24;
-      const totalPersonHours = Math.round((diffHours - lunchHours - repairDeduction) * 100) / 100;
+      const totalPersonHours = Math.round((diffHours - lunchHours - repairDeduction - travelHours) * 100) / 100;
+      if (totalPersonHours < 0) {
+        throw new Error('Обід, ремонт і перебазування разом більші за час роботи — перевір години.');
+      }
 
       const payload = {
         work_date: document.getElementById('work_date').value,
@@ -1267,7 +1274,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         end_time: endTime,
         lunch_hours: lunchHours,
         total_person_hours: totalPersonHours,
-        travel_hours: parseFloat(document.getElementById('travel_hours').value) || 0,
+        travel_hours: travelHours,
         travel_route: document.getElementById('travel_route').value || null,
         transported_people: transportedPeople,
         transport_route: transportedPeople ? transportRoute : null,
