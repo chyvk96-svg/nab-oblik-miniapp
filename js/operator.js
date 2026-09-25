@@ -615,6 +615,12 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   // чекає завершення черги — щоб currentDraftId був уже відомий і звіт
   // подавався тим самим рядком, а не новим (причина дублів, 24.09).
   let draftSaveChain = Promise.resolve();
+  // Є зміни у формі, які ще не потрапили в збереження (таймер 2,5 с ще не
+  // спрацював). Потрібно, щоб "Назад до меню" і згортання Telegram
+  // зберігали чернетку одразу, а не губили останні введені поля (25.09:
+  // губились заправка і "звідки заправились").
+  let hasUnsavedChanges = false;
+  let reportFormEl = null;   // саме ця форма (а не будь-яка з id report-form)
 
   let myEquipment, objects;
 
@@ -839,10 +845,22 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     </div>
   `;
 
-  document.getElementById('back-to-menu-form').addEventListener('click', () => {
+  document.getElementById('back-to-menu-form').addEventListener('click', async (e) => {
+    if (adminCtx) {
+      clearTimeout(autosaveTimer);
+      adminCtx.onDone();
+      return;
+    }
+    if (!isEdit) {
+      // Спершу дописати чернетку (не довше 5 с, щоб не зависнути без мережі)
+      const backEl = e.currentTarget;
+      if (backEl.dataset.busy) return;
+      backEl.dataset.busy = '1';
+      backEl.textContent = 'Збереження чернетки...';
+      await Promise.race([flushDraft(), new Promise(r => setTimeout(r, 5000))]);
+    }
     clearTimeout(autosaveTimer);
-    if (adminCtx) adminCtx.onDone();
-    else renderOperatorHome(user);
+    renderOperatorHome(user);
   });
 
   document.getElementById('has_breakdown').addEventListener('change', (e) => {
@@ -1078,13 +1096,22 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   }
 
   function saveDraft() {
+    hasUnsavedChanges = false;   // значення полів читаються в момент запису — нові зміни знову поставлять прапорець
     const run = draftSaveChain.then(saveDraftNow);
     draftSaveChain = run.catch(() => {});
     return run;
   }
 
+  // Зберегти негайно, якщо є незбережені зміни; інакше — дочекатись
+  // збереження, що вже виконується.
+  function flushDraft() {
+    clearTimeout(autosaveTimer);
+    if (hasUnsavedChanges) return saveDraft();
+    return draftSaveChain;
+  }
+
   async function saveDraftNow() {
-    if (!document.getElementById('report-form')) return; // форму вже закрито/замінено іншим екраном
+    if (!reportFormEl || !reportFormEl.isConnected) return; // форму вже закрито/замінено іншим екраном
     const equipmentId = document.getElementById('equipment_id').value;
     const objectId = document.getElementById('object_id').value;
     if (!equipmentId || !objectId) return; // ще нема з чим зберігати чернетку
@@ -1149,6 +1176,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   }
 
   function scheduleAutosave() {
+    hasUnsavedChanges = true;
     clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(saveDraft, 2500);
   }
@@ -1157,8 +1185,25 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   // звіту — це не чернетка, а реальний звіт, що чекає повторної відправки
   // через звичайний флоу коригування, без проміжного статусу "Чернетка".
   if (!isEdit) {
-    document.getElementById('report-form').addEventListener('input', scheduleAutosave);
-    document.getElementById('report-form').addEventListener('change', scheduleAutosave);
+    reportFormEl = document.getElementById('report-form');
+    reportFormEl.addEventListener('input', scheduleAutosave);
+    reportFormEl.addEventListener('change', scheduleAutosave);
+
+    // Згорнули Telegram / закрили Mini App — зберегти одразу, не чекаючи 2,5 с.
+    // Коли форму вже замінено іншим екраном, обробники прибирають себе самі.
+    const onHide = () => {
+      if (!reportFormEl.isConnected) {
+        document.removeEventListener('visibilitychange', onVisibility);
+        window.removeEventListener('pagehide', onHide);
+        return;
+      }
+      flushDraft();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') onHide();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', onHide);
   }
 
   const deleteDraftBtn = document.getElementById('delete-draft-btn');
