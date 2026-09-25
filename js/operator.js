@@ -768,11 +768,11 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         <div class="row2">
           <div>
             <label>Початок</label>
-            <input type="text" inputmode="numeric" id="start_time" placeholder="ГГ:ХВ" maxlength="5" value="${prefill ? formatTimeUA(prefill.start_time) : ''}" required>
+            <input type="text" inputmode="numeric" id="start_time" placeholder="ГГ:ХВ" maxlength="5" value="${timeInputValue(prefill && prefill.start_time)}" required>
           </div>
           <div>
             <label>Кінець</label>
-            <input type="text" inputmode="numeric" id="end_time" placeholder="ГГ:ХВ" maxlength="5" value="${prefill ? formatTimeUA(prefill.end_time) : ''}" required>
+            <input type="text" inputmode="numeric" id="end_time" placeholder="ГГ:ХВ" maxlength="5" value="${timeInputValue(prefill && prefill.end_time)}" required>
           </div>
         </div>
         <div class="hint-inline">Вводь час вручну у форматі ГГ:ХВ, наприклад 07:45</div>
@@ -1139,8 +1139,8 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       start_hours_note: document.getElementById('start_hours_note')?.value.trim() || null,
       start_km: tracksOdometer ? num('start_km') : null,
       end_km: tracksOdometer ? num('end_km') : null,
-      start_time: document.getElementById('start_time').value || null,
-      end_time: document.getElementById('end_time').value || null,
+      start_time: draftTimeValue(document.getElementById('start_time').value),
+      end_time: draftTimeValue(document.getElementById('end_time').value),
       lunch_hours: num('lunch_hours') || 0,
       travel_hours: num('travel_hours') || 0,
       travel_route: document.getElementById('travel_route').value || null,
@@ -1171,7 +1171,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       const now = new Date();
       setDraftStatus(`Чернетку збережено о ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
     } catch (e) {
-      setDraftStatus('Не вдалось зберегти чернетку (перевір з\'єднання).');
+      setDraftStatus(draftSaveErrorText(e));
     }
   }
 
@@ -1362,6 +1362,39 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       submitBtn.textContent = 'Перевірити звіт';
     }
   });
+}
+
+// ---------- Час роботи в чернетці ----------
+// Значення для поля вводу часу: "08:00:00" -> "08:00", порожнє -> "" (НЕ "—":
+// formatTimeUA повертає "—" для показу в картках, а в полі вводу цей символ
+// потрапляв в автозбереження, і база відхиляла весь запис чернетки — 25.09).
+function timeInputValue(timeStr) {
+  return timeStr ? String(timeStr).slice(0, 5) : '';
+}
+
+// У чернетку йде лише повний коректний час ГГ:ХВ; недописаний ("07:",
+// "7:3") чи неправильний — пропускається (NULL), щоб одне поле не ламало
+// збереження решти. Обов'язкова перевірка часу — при "Перевірити звіт".
+function draftTimeValue(raw) {
+  const v = String(raw || '').trim();
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : null;
+}
+
+// Текст помилки автозбереження: мережа — "перевір з'єднання", відмова
+// бази — коротко її власне повідомлення (щоб було видно справжню причину).
+function draftSaveErrorText(e) {
+  if (e instanceof TypeError) {
+    return 'Не вдалось зберегти чернетку (перевір з\'єднання).';
+  }
+  let detail = String(e && e.message || e || '');
+  const jsonStart = detail.indexOf('{');
+  if (jsonStart >= 0) {
+    try {
+      const body = JSON.parse(detail.slice(jsonStart));
+      detail = body.message || body.details || detail;
+    } catch (_) { /* лишаємо як є */ }
+  }
+  return 'Не вдалось зберегти чернетку: ' + detail.slice(0, 160);
 }
 
 // ---------- Захист від дублів звітів ----------
