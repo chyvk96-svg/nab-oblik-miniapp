@@ -498,8 +498,11 @@ async function renderAdminClosedReports(user) {
   try {
     reports = await supaGet(
       'daily_reports',
-      `status=eq.Фінально підтверджено&select=${REPORT_SELECT_FIELDS}&order=work_date.desc`
+      `status=eq.Фінально підтверджено&select=${REPORT_SELECT_FIELDS}`
     );
+    // За номером звіту від меншого до більшого (REP-009 < REP-010 < REP-1000)
+    const repNum = id => parseInt(String(id).replace(/\D/g, ''), 10) || 0;
+    (reports || []).sort((a, b) => repNum(a.id) - repNum(b.id));
   } catch (e) {
     document.getElementById('admin-list').textContent = 'Помилка завантаження: ' + e.message;
     return;
