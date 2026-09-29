@@ -24,6 +24,7 @@ function renderAdminHome(user) {
           Мої підтвердження
           <span class="sub">Звіти по об'єктах, де я відповідальний</span>
         </span>
+        ${pendingBadgeHtml()}
       </button>
       <button class="menu-btn" id="btn-history">
         <span class="emoji">📋</span>
@@ -73,6 +74,7 @@ function renderAdminHome(user) {
           Непідтверджені звіти
           <span class="sub">По всій компанії, лише перегляд</span>
         </span>
+        ${companyPendingBadgeHtml()}
       </button>
       <button class="menu-btn" id="btn-closed-reports">
         <span class="emoji">📊</span>
@@ -116,6 +118,8 @@ function renderAdminHome(user) {
   document.getElementById('btn-wialon-check').addEventListener('click', () => renderWialonCheck(user));
   document.getElementById('btn-object-report').addEventListener('click', () => renderObjectReport(user));
   document.getElementById('btn-operator-hours').addEventListener('click', () => renderOperatorHoursPick(user));
+  loadPendingBadge(user);
+  loadCompanyPendingBadge();
 }
 
 // ---------- Години оператора: вибір оператора / водія ----------
@@ -483,12 +487,24 @@ async function renderAdminPendingReports(user) {
 }
 
 // ---------- Усі закриті звіти по всій компанії ----------
+// Фільтр "День" + "Об'єкт": спершу обирається день, тоді в списку об'єктів
+// лишаються лише ті, де в цей день є закриті звіти (з кількістю).
+// "Усі дні" / "Усі об'єкти" — повний список, як раніше.
+// Вибір зберігається після редагування чи видалення звіту (filters).
 
-async function renderAdminClosedReports(user) {
+async function renderAdminClosedReports(user, filters) {
+  const keep = filters || { day: '', object: '' };
   app.innerHTML = `
     ${topbarHtml('Усі закриті звіти', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-menu-closed" style="margin:0 0 14px">← Назад до меню</div>
+      <div id="closed-filters" class="hidden" style="background:#fff; border:1px solid var(--line); border-radius:4px; padding:12px; margin-bottom:14px">
+        <label for="closed-day">День</label>
+        <select id="closed-day"></select>
+        <label for="closed-object">Об'єкт</label>
+        <select id="closed-object"></select>
+        <div id="closed-count" style="margin-top:10px; font-size:12.5px; color:var(--ink-soft)"></div>
+      </div>
       <div id="admin-list" class="msg">Завантаження...</div>
     </div>
   `;
@@ -498,7 +514,7 @@ async function renderAdminClosedReports(user) {
   try {
     reports = await supaGet(
       'daily_reports',
-      `status=eq.Фінально підтверджено&select=${REPORT_SELECT_FIELDS}`
+      `status=eq.Фінально підтверджено&select=${REPORT_SELECT_FIELDS},object_id`
     );
     // За номером звіту: зверху найсвіжіший (найбільший номер), знизу найстаріший
     // (числове порівняння: REP-1000 > REP-999 > REP-035)
@@ -516,10 +532,60 @@ async function renderAdminClosedReports(user) {
     return;
   }
 
-  listEl.className = '';
   const duplicates = findDuplicateIds(reports);
-  listEl.innerHTML = reports.map(r => adminReportCardHtml(r, user, duplicates)).join('');
-  wireAdminReportActions(listEl, user, reports, () => renderAdminClosedReports(user));
+  const daySel = document.getElementById('closed-day');
+  const objSel = document.getElementById('closed-object');
+  const countEl = document.getElementById('closed-count');
+  document.getElementById('closed-filters').classList.remove('hidden');
+
+  // Дні: від найновішого до найстарішого, з кількістю звітів
+  const dayCounts = new Map();
+  reports.forEach(r => dayCounts.set(r.work_date, (dayCounts.get(r.work_date) || 0) + 1));
+  const days = Array.from(dayCounts.keys()).sort((a, b) => String(b).localeCompare(String(a)));
+  daySel.innerHTML = `<option value="">Усі дні (${reports.length})</option>` +
+    days.map(d => `<option value="${d}">${formatDateUA(d)} (${dayCounts.get(d)})</option>`).join('');
+  daySel.value = days.includes(keep.day) ? keep.day : '';
+
+  // Об'єкти — лише ті, що є у вибраному дні
+  function fillObjects(preferred) {
+    const inDay = reports.filter(r => !daySel.value || r.work_date === daySel.value);
+    const objMap = new Map();
+    inDay.forEach(r => {
+      const id = r.object_id || '—';
+      if (!objMap.has(id)) objMap.set(id, { name: r.objects?.name || 'Без об\'єкта', n: 0 });
+      objMap.get(id).n++;
+    });
+    const objs = Array.from(objMap.entries()).sort((a, b) => a[1].name.localeCompare(b[1].name, 'uk'));
+    objSel.innerHTML = `<option value="">Усі об'єкти (${inDay.length})</option>` +
+      objs.map(([id, o]) => `<option value="${id}">${o.name} (${o.n})</option>`).join('');
+    objSel.value = objMap.has(preferred) ? preferred : '';
+  }
+
+  function showList() {
+    const shown = reports.filter(r =>
+      (!daySel.value || r.work_date === daySel.value) &&
+      (!objSel.value || (r.object_id || '—') === objSel.value)
+    );
+    countEl.textContent = `Показано звітів: ${shown.length}`;
+    if (shown.length === 0) {
+      listEl.className = 'msg';
+      listEl.textContent = 'За цим вибором закритих звітів немає.';
+      return;
+    }
+    listEl.className = '';
+    listEl.innerHTML = shown.map(r => adminReportCardHtml(r, user, duplicates)).join('');
+    wireAdminReportActions(listEl, user, reports,
+      () => renderAdminClosedReports(user, { day: daySel.value, object: objSel.value }));
+  }
+
+  fillObjects(keep.object);
+  showList();
+
+  daySel.addEventListener('change', () => {
+    fillObjects(objSel.value);
+    showList();
+  });
+  objSel.addEventListener('change', showList);
 }
 
 // ======================================================
