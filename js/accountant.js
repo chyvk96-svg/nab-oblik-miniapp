@@ -34,6 +34,7 @@ function renderAccountantHome(user) {
           Непідтверджені звіти
           <span class="sub">По всій компанії, лише перегляд</span>
         </span>
+        ${companyPendingBadgeHtml()}
       </button>
       <button class="menu-btn" id="btn-acc-closed">
         <span class="emoji">📊</span>
@@ -54,6 +55,7 @@ function renderAccountantHome(user) {
   document.getElementById('btn-acc-pending').addEventListener('click', () => renderAdminPendingReports(user));
   document.getElementById('btn-acc-closed').addEventListener('click', () => renderAdminClosedReports(user));
   document.getElementById('btn-acc-object-report').addEventListener('click', () => renderMultiObjectReport(user));
+  loadCompanyPendingBadge(); // лічильник з responsible.js
 }
 
 // ======================================================
