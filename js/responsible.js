@@ -27,6 +27,7 @@ function renderResponsibleHome(user) {
           Мої підтвердження
           <span class="sub">Звіти, що очікують дії</span>
         </span>
+        ${pendingBadgeHtml()}
       </button>
       <button class="menu-btn" id="btn-history">
         <span class="emoji">📋</span>
@@ -55,6 +56,58 @@ function renderResponsibleHome(user) {
   document.getElementById('btn-history').addEventListener('click', () => renderApprovalHistory(user));
   document.getElementById('btn-add-object').addEventListener('click', () => renderAddObject(user));
   document.getElementById('btn-manage-objects').addEventListener('click', () => renderManageObjects(user));
+  loadPendingBadge(user);
+}
+
+// ---------- Лічильники на кнопках меню ----------
+// Два різні кружки з кількістю звітів "Очікує відповідального":
+//   червоний (pendingBadgeHtml / loadPendingBadge) — на "Мої підтвердження":
+//     звіти, що чекають підтвердження САМЕ цього користувача (ті самі, що
+//     відкриваються за кнопкою). Відповідальний і адміністратор.
+//   темний з жовтою цифрою (companyPendingBadgeHtml / loadCompanyPendingBadge)
+//     — на "Непідтверджені звіти": усі такі звіти по компанії.
+//     Адміністратор і обліковець.
+// Оновлюються щоразу, коли малюється головне меню. Якщо запит не вдався
+// або звітів немає — кружок не показується, меню працює як звичайно.
+
+function countBadgeHtml(id, background, color) {
+  return `<span id="${id}" class="hidden" style="margin-left:auto; flex-shrink:0; min-width:28px; height:28px; padding:0 8px; border-radius:14px; background:${background}; color:${color}; font-family:'Oswald', sans-serif; font-size:15px; font-weight:600; line-height:28px; text-align:center"></span>`;
+}
+
+function pendingBadgeHtml() {
+  return countBadgeHtml('pending-badge', 'var(--danger)', '#fff');
+}
+
+function companyPendingBadgeHtml() {
+  return countBadgeHtml('company-pending-badge', 'var(--asphalt)', 'var(--brand-yellow)');
+}
+
+async function fillCountBadge(badgeId, query) {
+  let rows;
+  try {
+    rows = await supaGet('daily_reports', query);
+  } catch (e) {
+    return;
+  }
+  const badge = document.getElementById(badgeId);
+  if (!badge) return; // користувач уже пішов з меню
+  const n = (rows || []).length;
+  if (n > 0) {
+    badge.textContent = n > 99 ? '99+' : String(n);
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+function loadPendingBadge(user) {
+  return fillCountBadge('pending-badge',
+    `responsible_id=eq.${user.id}&status=eq.Очікує відповідального&select=id`);
+}
+
+function loadCompanyPendingBadge() {
+  return fillCountBadge('company-pending-badge',
+    'status=eq.Очікує відповідального&select=id');
 }
 
 // ---------- Додати новий об'єкт ----------
