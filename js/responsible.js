@@ -629,6 +629,9 @@ function reportDetailsHtml(r) {
   const downtimeLine = (r.downtime_hours && r.downtime_hours > 0)
     ? `<div class="detail-row"><span class="label">Простій:</span> ${r.downtime_hours} год — ${r.downtime_reason || '—'}</div>`
     : '';
+  const commuteLine = (r.commute_hours && r.commute_hours > 0)
+    ? `<div class="detail-row"><span class="label">Дорога на роботу і назад:</span> ${r.commute_hours} год${r.commute_route ? ' — ' + r.commute_route : ''}</div>`
+    : '';
   const travelLine = (r.travel_hours && r.travel_hours > 0)
     ? `<div class="detail-row"><span class="label">Перебазування техніки:</span> ${r.travel_hours} год${r.travel_route ? ' — ' + r.travel_route : ''}</div>`
     : '';
@@ -665,6 +668,7 @@ function reportDetailsHtml(r) {
     ${kmLine}
     <div class="detail-row"><span class="label">Час роботи:</span> ${formatTimeUA(r.start_time)} – ${formatTimeUA(r.end_time)}, людиногодин: ${r.total_person_hours}</div>
     <div class="detail-row"><span class="label">Обід:</span> ${r.lunch_hours} год</div>
+    ${commuteLine}
     ${travelLine}
     ${transportLine}
     ${downtimeLine}
@@ -681,7 +685,7 @@ function reportDetailsHtml(r) {
 // ---------- Мої підтвердження: звіти, що очікують дії ----------
 
 const REPORT_SELECT_FIELDS = 'id,work_date,status,equipment_id,customer_name,start_hours,end_hours,total_moto_hours,start_km,end_km,total_km,start_time,end_time,' +
-  'lunch_hours,total_person_hours,travel_hours,travel_route,transported_people,transport_route,transport_hours,' +
+  'lunch_hours,total_person_hours,commute_hours,commute_route,travel_hours,travel_route,transported_people,transport_route,transport_hours,' +
   'downtime_hours,downtime_reason,fueling_liters,fueling_source,' +
   'has_breakdown,breakdown_description,repair_hours,start_hours_note,' +
   'operator_note,submitted_at,final_closed_at,equipment(name),objects(name),users!daily_reports_operator_id_fkey(full_name)';
