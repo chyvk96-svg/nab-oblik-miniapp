@@ -109,7 +109,7 @@ async function loadMultiObjectPeriod(user, from, to) {
       'daily_reports',
       `work_date=gte.${from}&work_date=lte.${to}` +
       `&select=id,work_date,status,object_id,objects(id,name,customers(name)),equipment_id,equipment(name),` +
-      `users!daily_reports_operator_id_fkey(full_name),total_moto_hours,total_person_hours,travel_hours,travel_route,operator_note` +
+      `users!daily_reports_operator_id_fkey(full_name),total_moto_hours,total_person_hours,commute_hours,commute_route,travel_hours,travel_route,operator_note` +
       `&order=work_date.asc`
     );
   } catch (e) {
@@ -185,6 +185,7 @@ async function loadMultiObjectPeriod(user, from, to) {
           <div class="meta">Об'єктів: ${ids.size} · техніки: ${new Set(confirmed.map(r => r.equipment_id)).size} · підтверджених звітів: ${confirmed.length}</div>
           <div class="detail-row">Мотогодини: <b>${fmtNum(sum(confirmed, 'total_moto_hours'))}</b></div>
           <div class="detail-row">Людиногодини: <b>${fmtNum(sum(confirmed, 'total_person_hours'))}</b></div>
+          ${sum(confirmed, 'commute_hours') > 0 ? `<div class="detail-row">Дорога на роботу і назад: ${fmtNum(sum(confirmed, 'commute_hours'))} год</div>` : ''}
           <div class="detail-row">Перебазування: ${fmtNum(sum(confirmed, 'travel_hours'))} год</div>
           ${other.length ? `<div class="detail-row" style="color:var(--caution)">⏳ Не підтверджено (окремо, у підсумок не входить): ${other.length}</div>` : ''}
         </div>
@@ -256,7 +257,7 @@ function buildMultiObjectWorkbook(ExcelJS, { confirmed, other, objectNames, from
   confirmed.forEach(r => {
     const k = r.equipment_id || '—';
     if (!byEq.has(k)) {
-      byEq.set(k, { name: r.equipment?.name || '—', objects: new Set(), ops: new Set(), dates: new Set(), first: r.work_date, last: r.work_date, moto: 0, person: 0, travel: 0 });
+      byEq.set(k, { name: r.equipment?.name || '—', objects: new Set(), ops: new Set(), dates: new Set(), first: r.work_date, last: r.work_date, moto: 0, person: 0, commute: 0, travel: 0 });
     }
     const g = byEq.get(k);
     g.objects.add(shortObj(r));
@@ -266,6 +267,7 @@ function buildMultiObjectWorkbook(ExcelJS, { confirmed, other, objectNames, from
     if (r.work_date > g.last) g.last = r.work_date;
     g.moto += Number(r.total_moto_hours) || 0;
     g.person += Number(r.total_person_hours) || 0;
+    g.commute += Number(r.commute_hours) || 0;
     g.travel += Number(r.travel_hours) || 0;
   });
   const eqRows = Array.from(byEq.values()).sort((a, b) => a.name.localeCompare(b.name, 'uk'));
@@ -283,6 +285,7 @@ function buildMultiObjectWorkbook(ExcelJS, { confirmed, other, objectNames, from
       { header: 'Днів', width: 8, type: 'int', get: g => g.dates.size },
       { header: 'Мотогодини', width: 12, type: 'hours', get: g => g.moto, total: true },
       { header: 'Людиногодини', width: 13, type: 'hours', get: g => g.person, total: true },
+      { header: 'Дорога на роботу, год', width: 14, type: 'hours', get: g => g.commute, total: true },
       { header: 'Перебазування, год', width: 15, type: 'hours', get: g => g.travel, total: true }
     ],
     rows: eqRows,
@@ -294,12 +297,13 @@ function buildMultiObjectWorkbook(ExcelJS, { confirmed, other, objectNames, from
   const byObj = new Map();
   confirmed.forEach(r => {
     const k = r.object_id || '—';
-    if (!byObj.has(k)) byObj.set(k, { name: objName(r), eq: new Set(), n: 0, moto: 0, person: 0, travel: 0 });
+    if (!byObj.has(k)) byObj.set(k, { name: objName(r), eq: new Set(), n: 0, moto: 0, person: 0, commute: 0, travel: 0 });
     const g = byObj.get(k);
     g.eq.add(r.equipment_id);
     g.n += 1;
     g.moto += Number(r.total_moto_hours) || 0;
     g.person += Number(r.total_person_hours) || 0;
+    g.commute += Number(r.commute_hours) || 0;
     g.travel += Number(r.travel_hours) || 0;
   });
   const objRows = Array.from(byObj.values()).sort((a, b) => a.name.localeCompare(b.name, 'uk'));
@@ -314,6 +318,7 @@ function buildMultiObjectWorkbook(ExcelJS, { confirmed, other, objectNames, from
       { header: 'Звітів', width: 8, type: 'int', get: g => g.n, total: true },
       { header: 'Мотогодини', width: 12, type: 'hours', get: g => g.moto, total: true },
       { header: 'Людиногодини', width: 13, type: 'hours', get: g => g.person, total: true },
+      { header: 'Дорога на роботу, год', width: 14, type: 'hours', get: g => g.commute, total: true },
       { header: 'Перебазування, год', width: 15, type: 'hours', get: g => g.travel, total: true }
     ],
     rows: objRows,
@@ -330,6 +335,8 @@ function buildMultiObjectWorkbook(ExcelJS, { confirmed, other, objectNames, from
     { header: 'Оператор', width: 24, type: 'name', get: r => r.users?.full_name || '' },
     { header: 'Мотогодини', width: 12, type: 'hours', get: r => r.total_moto_hours, total: true },
     { header: 'Людиногодини', width: 13, type: 'hours', get: r => r.total_person_hours, total: true },
+    { header: 'Дорога на роботу, год', width: 14, type: 'hours', get: r => r.commute_hours, total: true },
+    { header: 'Маршрут дороги на роботу', width: 26, type: 'long', get: r => r.commute_route || '' },
     { header: 'Перебазування, год', width: 15, type: 'hours', get: r => r.travel_hours, total: true },
     { header: 'Маршрут перебазування', width: 26, type: 'long', get: r => r.travel_route || '' },
     { header: 'Примітка', width: 28, type: 'long', get: r => r.operator_note || '' }
