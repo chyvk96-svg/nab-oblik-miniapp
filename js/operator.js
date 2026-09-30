@@ -671,6 +671,18 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
 
   const today = new Date().toISOString().split('T')[0];
 
+  // Блок "Що ще було за зміну?": які розділи відкрити одразу (є дані
+  // в чернетці / звіті, що редагується). Старі звіти без кнопок-позначок —
+  // розділ відкривається, якщо в ньому є години або текст.
+  const hasVal = v => v !== null && v !== undefined && v !== '' && Number(v) !== 0;
+  const hasText = v => v !== null && v !== undefined && String(v).trim() !== '';
+  const extraOn = {
+    commute: !!prefill && (hasVal(prefill.commute_hours) || hasText(prefill.commute_route)),
+    travel: !!prefill && (hasVal(prefill.travel_hours) || hasText(prefill.travel_route)),
+    transport: !!prefill && !!prefill.transported_people,
+    downtime: !!prefill && (hasVal(prefill.downtime_hours) || hasText(prefill.downtime_reason))
+  };
+
   const equipmentOptions = myEquipment
     .map(ue => `<option value="${ue.equipment.id}"${prefill && prefill.equipment_id === ue.equipment.id ? ' selected' : ''}>${ue.equipment.name}</option>`)
     .join('');
@@ -781,40 +793,59 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       </div>
 
       <div class="section">
-        <div class="section-title"><span class="n">5</span><span class="icon">🚗</span>Перебазування техніки</div>
-        <label>Години</label>
-        <input type="number" step="0.1" id="travel_hours" value="${prefill ? (prefill.travel_hours || 0) : '0'}">
-        <div class="hint-inline">Години перебазування оплачуються окремо й віднімаються від людиногодин (час роботи вказуй разом із дорогою).</div>
-        <label>Опис маршруту</label>
-        <input type="text" id="travel_route" placeholder="Звідки → куди" value="${prefill && prefill.travel_route ? prefill.travel_route : ''}">
-      </div>
+        <div class="section-title"><span class="n">5</span><span class="icon">➕</span>Що ще було за зміну?</div>
+        <div class="hint-inline" style="margin-top:0">Натисни, якщо було, — відкриються поля. Якщо нічого з цього не було, просто пропусти.</div>
 
-      <div class="section">
-        <div class="section-title"><span class="n">6</span><span class="icon">🚌</span>Перевезення людей</div>
+        <!-- Стан кнопок зберігається в прихованих галочках (їх читають автозбереження і перевірка) -->
+        <input type="checkbox" id="has_commute" class="hidden"${extraOn.commute ? ' checked' : ''}>
+        <input type="checkbox" id="has_travel" class="hidden"${extraOn.travel ? ' checked' : ''}>
+        <input type="checkbox" id="transported_people" class="hidden"${extraOn.transport ? ' checked' : ''}>
+        <input type="checkbox" id="has_downtime" class="hidden"${extraOn.downtime ? ' checked' : ''}>
 
-        <div class="checkbox-row" style="margin-top:0; border-top:none; padding-top:0">
-          <input type="checkbox" id="transported_people"${prefill && prefill.transported_people ? ' checked' : ''}>
-          <label for="transported_people">Перевозив людей (автобус)</label>
+        <div class="extra-chips">
+          <button type="button" class="extra-chip" data-extra="has_commute">🚐 Дорога на роботу</button>
+          <button type="button" class="extra-chip" data-extra="has_travel">🚗 Перебазування</button>
+          <button type="button" class="extra-chip" data-extra="transported_people">🚌 Перевезення людей</button>
+          <button type="button" class="extra-chip" data-extra="has_downtime">⏸ Простій</button>
         </div>
 
-        <div id="transport-block" class="${prefill && prefill.transported_people ? '' : 'hidden'}">
+        <div class="extra-block hidden" id="commute-block">
+          <div class="extra-title">🚐 Дорога на роботу і назад</div>
           <label>Маршрут</label>
-          <input type="text" id="transport_route" placeholder="Звідки → куди" value="${prefill && prefill.transport_route ? prefill.transport_route : ''}">
+          <input type="text" id="commute_route" placeholder="Звідки → куди, напр. Надвірна → Пасічна" value="${prefill && prefill.commute_route ? escHtml(prefill.commute_route) : ''}">
+          <label>Години (туди й назад разом)</label>
+          <input type="number" step="0.1" id="commute_hours" value="${prefill && prefill.commute_hours ? prefill.commute_hours : ''}">
+          <div class="hint-inline">Час роботи вказуй разом із дорогою — години дороги віднімаються від людиногодин і рахуються окремо.</div>
+        </div>
+
+        <div class="extra-block hidden" id="travel-block">
+          <div class="extra-title">🚗 Перебазування техніки</div>
           <label>Години</label>
-          <input type="number" step="0.1" id="transport_hours" value="${prefill && prefill.transport_hours ? prefill.transport_hours : '0'}">
+          <input type="number" step="0.1" id="travel_hours" value="${prefill && prefill.travel_hours ? prefill.travel_hours : ''}">
+          <div class="hint-inline">Години перебазування оплачуються окремо й віднімаються від людиногодин (час роботи вказуй разом із дорогою).</div>
+          <label>Опис маршруту</label>
+          <input type="text" id="travel_route" placeholder="Звідки → куди" value="${prefill && prefill.travel_route ? escHtml(prefill.travel_route) : ''}">
+        </div>
+
+        <div class="extra-block hidden" id="transport-block">
+          <div class="extra-title">🚌 Перевезення людей (автобус)</div>
+          <label>Маршрут</label>
+          <input type="text" id="transport_route" placeholder="Звідки → куди" value="${prefill && prefill.transport_route ? escHtml(prefill.transport_route) : ''}">
+          <label>Години</label>
+          <input type="number" step="0.1" id="transport_hours" value="${prefill && prefill.transport_hours ? prefill.transport_hours : ''}">
+        </div>
+
+        <div class="extra-block hidden" id="downtime-block">
+          <div class="extra-title">⏸ Простій</div>
+          <label>Години</label>
+          <input type="number" step="0.1" id="downtime_hours" value="${prefill && prefill.downtime_hours ? prefill.downtime_hours : ''}">
+          <label>Причина</label>
+          <input type="text" id="downtime_reason" value="${prefill && prefill.downtime_reason ? escHtml(prefill.downtime_reason) : ''}">
         </div>
       </div>
 
       <div class="section">
-        <div class="section-title"><span class="n">7</span><span class="icon">⏸</span>Простій</div>
-        <label>Години</label>
-        <input type="number" step="0.1" id="downtime_hours" value="${prefill ? (prefill.downtime_hours || 0) : '0'}">
-        <label>Причина</label>
-        <input type="text" id="downtime_reason" value="${prefill && prefill.downtime_reason ? prefill.downtime_reason : ''}">
-      </div>
-
-      <div class="section">
-        <div class="section-title"><span class="n">8</span><span class="icon">⛽</span>Заправка та поломки</div>
+        <div class="section-title"><span class="n">6</span><span class="icon">⛽</span>Заправка та поломки</div>
         <label>Заправка, л</label>
         <input type="number" step="0.1" id="fueling_liters" value="${prefill ? (prefill.fueling_liters || 0) : '0'}">
         <label>Звідки заправились</label>
@@ -834,7 +865,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       </div>
 
       <div class="section">
-        <div class="section-title"><span class="n">9</span><span class="icon">📝</span>Примітка</div>
+        <div class="section-title"><span class="n">7</span><span class="icon">📝</span>Примітка</div>
         <textarea id="operator_note" placeholder="Довільний коментар до звіту">${prefill && prefill.operator_note ? prefill.operator_note : ''}</textarea>
       </div>
 
@@ -867,9 +898,37 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     document.getElementById('repair-block').classList.toggle('hidden', !e.target.checked);
   });
 
-  document.getElementById('transported_people').addEventListener('change', (e) => {
-    document.getElementById('transport-block').classList.toggle('hidden', !e.target.checked);
+  // Кнопки "Що ще було за зміну?": натискання перемикає приховану галочку
+  // й показує/ховає розділ. Введені значення при вимкненні не стираються
+  // з полів (якщо натиснув випадково — натисни ще раз), але у звіт і
+  // чернетку потрапляють лише увімкнені розділи.
+  const EXTRA_BLOCKS = {
+    has_commute: 'commute-block',
+    has_travel: 'travel-block',
+    transported_people: 'transport-block',
+    has_downtime: 'downtime-block'
+  };
+  function syncExtraBlocks() {
+    document.querySelectorAll('#report-form .extra-chip').forEach(chip => {
+      const on = document.getElementById(chip.dataset.extra).checked;
+      chip.classList.toggle('on', on);
+      chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+      document.getElementById(EXTRA_BLOCKS[chip.dataset.extra]).classList.toggle('hidden', !on);
+    });
+  }
+  document.querySelectorAll('#report-form .extra-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const box = document.getElementById(chip.dataset.extra);
+      box.checked = !box.checked;
+      syncExtraBlocks();
+      box.dispatchEvent(new Event('change', { bubbles: true })); // → автозбереження
+      if (box.checked) {
+        const firstInput = document.querySelector(`#${EXTRA_BLOCKS[chip.dataset.extra]} input`);
+        if (firstInput) firstInput.focus();
+      }
+    });
   });
+  syncExtraBlocks();
 
   // Підказка і автопідстановка початкових мотогодин при виборі техніки
   function applySuggestedStartHours() {
@@ -1126,6 +1185,10 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     const tracksOdometer = !onBaseOnly && tracksOdometerMap[equipmentId] === true;
     const hasBreakdown = document.getElementById('has_breakdown').checked;
     const transportedPeople = document.getElementById('transported_people').checked;
+    const hasCommute = document.getElementById('has_commute').checked;
+    const hasTravel = document.getElementById('has_travel').checked;
+    const hasDowntime = document.getElementById('has_downtime').checked;
+    const txt = (id) => document.getElementById(id).value.trim() || null;
 
     const draftPayload = {
       work_date: document.getElementById('work_date').value || today,
@@ -1142,13 +1205,15 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       start_time: draftTimeValue(document.getElementById('start_time').value),
       end_time: draftTimeValue(document.getElementById('end_time').value),
       lunch_hours: num('lunch_hours') || 0,
-      travel_hours: num('travel_hours') || 0,
-      travel_route: document.getElementById('travel_route').value || null,
+      commute_hours: hasCommute ? (num('commute_hours') || 0) : 0,
+      commute_route: hasCommute ? txt('commute_route') : null,
+      travel_hours: hasTravel ? (num('travel_hours') || 0) : 0,
+      travel_route: hasTravel ? txt('travel_route') : null,
       transported_people: transportedPeople,
-      transport_route: transportedPeople ? (document.getElementById('transport_route').value.trim() || null) : null,
+      transport_route: transportedPeople ? txt('transport_route') : null,
       transport_hours: transportedPeople ? num('transport_hours') : null,
-      downtime_hours: num('downtime_hours') || 0,
-      downtime_reason: document.getElementById('downtime_reason').value || null,
+      downtime_hours: hasDowntime ? (num('downtime_hours') || 0) : 0,
+      downtime_reason: hasDowntime ? txt('downtime_reason') : null,
       fueling_liters: num('fueling_liters') || 0,
       fueling_source: document.getElementById('fueling_source').value || null,
       has_breakdown: hasBreakdown,
@@ -1289,6 +1354,24 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         throw new Error('Вкажи маршрут і години перевезення людей.');
       }
 
+      // Розділи "Що ще було за зміну?": якщо кнопку натиснуто — поля обов'язкові
+      const hasCommute = document.getElementById('has_commute').checked;
+      const commuteRoute = document.getElementById('commute_route').value.trim();
+      const commuteHours = hasCommute ? (parseFloat(document.getElementById('commute_hours').value) || 0) : 0;
+      if (hasCommute && (!commuteRoute || commuteHours <= 0)) {
+        throw new Error('Вкажи маршрут і години дороги на роботу (або вимкни кнопку «Дорога на роботу»).');
+      }
+      const hasTravel = document.getElementById('has_travel').checked;
+      if (hasTravel && !((parseFloat(document.getElementById('travel_hours').value) || 0) > 0)) {
+        throw new Error('Вкажи години перебазування (або вимкни кнопку «Перебазування»).');
+      }
+      const hasDowntime = document.getElementById('has_downtime').checked;
+      const downtimeHours = hasDowntime ? (parseFloat(document.getElementById('downtime_hours').value) || 0) : 0;
+      const downtimeReason = document.getElementById('downtime_reason').value.trim();
+      if (hasDowntime && (downtimeHours <= 0 || !downtimeReason)) {
+        throw new Error('Вкажи години і причину простою (або вимкни кнопку «Простій»).');
+      }
+
       const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/;
       const startTime = document.getElementById('start_time').value.trim();
       const endTime = document.getElementById('end_time').value.trim();
@@ -1304,15 +1387,17 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       const repairDeduction = repairHours > 0.5 ? repairHours : 0;
       // Перебазування техніки оплачується окремо: час роботи оператор вказує
       // разом із дорогою, тому години перебазування віднімаються (2026-09-25)
-      const travelHours = parseFloat(document.getElementById('travel_hours').value) || 0;
+      const travelHours = hasTravel ? (parseFloat(document.getElementById('travel_hours').value) || 0) : 0;
+      // Дорога на роботу і назад (бусом) — так само: час роботи вказується
+      // разом із дорогою, години дороги віднімаються й рахуються окремо (2026-09-30)
 
       const [sh, sm] = startTime.split(':').map(Number);
       const [eh, em] = endTime.split(':').map(Number);
       let diffHours = (eh + em / 60) - (sh + sm / 60);
       if (diffHours < 0) diffHours += 24;
-      const totalPersonHours = Math.round((diffHours - lunchHours - repairDeduction - travelHours) * 100) / 100;
+      const totalPersonHours = Math.round((diffHours - lunchHours - repairDeduction - travelHours - commuteHours) * 100) / 100;
       if (totalPersonHours < 0) {
-        throw new Error('Обід, ремонт і перебазування разом більші за час роботи — перевір години.');
+        throw new Error('Обід, ремонт, перебазування і дорога на роботу разом більші за час роботи — перевір години.');
       }
 
       const payload = {
@@ -1331,13 +1416,15 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         end_time: endTime,
         lunch_hours: lunchHours,
         total_person_hours: totalPersonHours,
+        commute_hours: commuteHours,
+        commute_route: hasCommute ? commuteRoute : null,
         travel_hours: travelHours,
-        travel_route: document.getElementById('travel_route').value || null,
+        travel_route: hasTravel ? (document.getElementById('travel_route').value.trim() || null) : null,
         transported_people: transportedPeople,
         transport_route: transportedPeople ? transportRoute : null,
         transport_hours: transportedPeople ? transportHours : null,
-        downtime_hours: parseFloat(document.getElementById('downtime_hours').value) || 0,
-        downtime_reason: document.getElementById('downtime_reason').value || null,
+        downtime_hours: downtimeHours,
+        downtime_reason: hasDowntime ? downtimeReason : null,
         fueling_liters: parseFloat(document.getElementById('fueling_liters').value) || 0,
         fueling_source: document.getElementById('fueling_source').value || null,
         has_breakdown: hasBreakdown,
