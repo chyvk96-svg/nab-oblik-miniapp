@@ -1,4 +1,4 @@
-  :root {
+:root {
     --asphalt: #141311;
     --concrete: #F3F1EA;
     --steel: #D8D4C8;
@@ -400,3 +400,49 @@
     margin-top: 10px;
   }
   .item-actions button { flex: 1; }
+
+  /* ---------- Форма звіту: "Що ще було за зміну?" (2026-09-30) ----------
+     Рідкісні розділи (дорога на роботу, перебазування, перевезення людей,
+     простій) сховані за кнопками — відкриваються натисканням. */
+  .extra-chips {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .extra-chip {
+    padding: 11px 8px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: #fff;
+    color: var(--ink);
+    font-family: 'Inter', sans-serif;
+    font-size: 13.5px;
+    font-weight: 500;
+    line-height: 1.2;
+    text-align: center;
+    cursor: pointer;
+  }
+  .extra-chip.on {
+    background: var(--asphalt);
+    border-color: var(--asphalt);
+    color: var(--brand-yellow);
+    font-weight: 600;
+  }
+  .extra-chip.on::before { content: '✓ '; }
+  .extra-block {
+    margin-top: 12px;
+    padding: 10px 12px 12px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--brand-yellow);
+    border-radius: 4px;
+  }
+  .extra-title {
+    font-family: 'Oswald', sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.03em;
+    color: var(--ink);
+    margin-bottom: 4px;
+  }
