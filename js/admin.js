@@ -906,7 +906,7 @@ const OBJREP_SELECT =
   'id,work_date,status,object_id,objects(id,name,customers(name)),customer_name,' +
   'equipment_id,equipment(name),operator_id,users!daily_reports_operator_id_fkey(full_name),' +
   'start_hours,end_hours,total_moto_hours,start_km,end_km,total_km,start_time,end_time,lunch_hours,total_person_hours,' +
-  'travel_hours,travel_route,transport_hours,transport_route,downtime_hours,downtime_reason,fueling_liters,fueling_source,' +
+  'commute_hours,commute_route,travel_hours,travel_route,transport_hours,transport_route,downtime_hours,downtime_reason,fueling_liters,fueling_source,' +
   'has_breakdown,breakdown_description,repair_hours,operator_note';
 
 function objectLabel(obj) {
@@ -936,6 +936,7 @@ function groupObjectReportRows(reports) {
         moto_hours: 0,
         km: null,
         person_hours: 0,
+        commute_hours: 0,
         travel_hours: 0,
         transport_hours: 0,
         downtime_hours: 0,
@@ -954,6 +955,7 @@ function groupObjectReportRows(reports) {
     g.moto_hours += n(r.total_moto_hours);
     if (r.total_km !== null && r.total_km !== undefined) g.km = (g.km || 0) + n(r.total_km);
     g.person_hours += n(r.total_person_hours);
+    g.commute_hours += n(r.commute_hours);
     g.travel_hours += n(r.travel_hours);
     g.transport_hours += n(r.transport_hours);
     g.downtime_hours += n(r.downtime_hours);
@@ -968,6 +970,7 @@ function groupObjectReportRows(reports) {
     moto_hours: r2(g.moto_hours),
     km: g.km === null ? null : Math.round(g.km * 10) / 10,
     person_hours: r2(g.person_hours),
+    commute_hours: r2(g.commute_hours),
     travel_hours: r2(g.travel_hours),
     transport_hours: r2(g.transport_hours),
     downtime_hours: r2(g.downtime_hours),
@@ -1098,6 +1101,7 @@ function renderObjectReportResult(user, chosen, reports, from, to) {
       <div class="detail-row">Звітів: <b>${sum('reports_count')}</b> (підтверджено ${sum('confirmed_count')}) · техніки: ${new Set(rows.map(r => r.equipment_id)).size} · операторів: ${new Set(rows.map(r => r.operator_id)).size}</div>
       <div class="detail-row">Мотогодини: <b>${fmtNum(sum('moto_hours'))}</b>${kmRows.length ? ` · пробіг: <b>${fmtNum(sum('km'), 1)}</b> км` : ''}</div>
       <div class="detail-row">Людиногодини: <b>${fmtNum(sum('person_hours'))}</b></div>
+      ${sum('commute_hours') > 0 ? `<div class="detail-row">Дорога на роботу і назад: ${fmtNum(sum('commute_hours'))} год</div>` : ''}
       <div class="detail-row">Перебазування: ${fmtNum(sum('travel_hours'))} год · перевезення людей: ${fmtNum(sum('transport_hours'))} год</div>
       <div class="detail-row">Простій: ${fmtNum(sum('downtime_hours'))} год · ремонт: ${fmtNum(sum('repair_hours'))} год · поломок: ${sum('breakdowns_count')}</div>
       <div class="detail-row">Заправка: <b>${fmtNum(sum('fueling_liters'), 1)}</b> л</div>
@@ -1119,6 +1123,7 @@ function renderObjectReportResult(user, chosen, reports, from, to) {
         <div class="meta">${formatDateUA(r.first_date)} – ${formatDateUA(r.last_date)} · звітів ${r.reports_count} (підтверджено ${r.confirmed_count})</div>
         <div class="detail-row">Мотогодини: <b>${fmtNum(r.moto_hours)}</b>${r.km !== null ? ` · пробіг: <b>${fmtNum(r.km, 1)}</b> км` : ''}</div>
         <div class="detail-row">Людиногодини: <b>${fmtNum(r.person_hours)}</b></div>
+        ${Number(r.commute_hours) > 0 ? `<div class="detail-row">Дорога на роботу і назад: ${fmtNum(r.commute_hours)} год</div>` : ''}
         ${Number(r.travel_hours) > 0 || Number(r.transport_hours) > 0 ? `<div class="detail-row">Перебазування: ${fmtNum(r.travel_hours)} год · перевезення людей: ${fmtNum(r.transport_hours)} год</div>` : ''}
         ${Number(r.downtime_hours) > 0 || Number(r.repair_hours) > 0 || Number(r.breakdowns_count) > 0 ? `<div class="detail-row">Простій: ${fmtNum(r.downtime_hours)} год · ремонт: ${fmtNum(r.repair_hours)} год · поломок: ${r.breakdowns_count}</div>` : ''}
         <div class="detail-row">Заправка: ${fmtNum(r.fueling_liters, 1)} л</div>
@@ -1599,6 +1604,7 @@ function buildObjectReportWorkbook(ExcelJS, { objectNames, from, to, rows, repor
     { label: 'Мотогодини', value: sum('moto_hours'), type: 'hours' },
     { label: 'Пробіг, км', value: kmRows.length ? sum('km') : null, type: 'km' },
     { label: 'Людиногодини', value: sum('person_hours'), type: 'hours' },
+    { label: 'Дорога на роботу, год', value: sum('commute_hours'), type: 'hours' },
     { label: 'Перебазування, год', value: sum('travel_hours'), type: 'hours' },
     { label: 'Перевезення людей, год', value: sum('transport_hours'), type: 'hours' },
     { label: 'Простій, год', value: sum('downtime_hours'), type: 'hours' },
@@ -1623,7 +1629,7 @@ function buildObjectReportWorkbook(ExcelJS, { objectNames, from, to, rows, repor
   if (multi) {
     const byObj = new Map();
     rows.forEach(r => {
-      if (!byObj.has(r.object_id)) byObj.set(r.object_id, { name: r.object_name, eq: new Set(), ops: new Set(), reports: 0, confirmed: 0, moto: 0, person: 0, travel: 0, transport: 0, fuel: 0 });
+      if (!byObj.has(r.object_id)) byObj.set(r.object_id, { name: r.object_name, eq: new Set(), ops: new Set(), reports: 0, confirmed: 0, moto: 0, person: 0, commute: 0, travel: 0, transport: 0, fuel: 0 });
       const g = byObj.get(r.object_id);
       g.eq.add(r.equipment_id);
       g.ops.add(r.operator_id);
@@ -1631,6 +1637,7 @@ function buildObjectReportWorkbook(ExcelJS, { objectNames, from, to, rows, repor
       g.confirmed += r.confirmed_count;
       g.moto += Number(r.moto_hours) || 0;
       g.person += Number(r.person_hours) || 0;
+      g.commute += Number(r.commute_hours) || 0;
       g.travel += Number(r.travel_hours) || 0;
       g.transport += Number(r.transport_hours) || 0;
       g.fuel += Number(r.fueling_liters) || 0;
@@ -1647,6 +1654,7 @@ function buildObjectReportWorkbook(ExcelJS, { objectNames, from, to, rows, repor
         { header: 'Підтверджено', width: 13, type: 'int', get: g => g.confirmed, total: true },
         { header: 'Мотогодини', width: 12, type: 'hours', get: g => g.moto, total: true },
         { header: 'Людиногодини', width: 13, type: 'hours', get: g => g.person, total: true },
+        { header: 'Дорога на роботу, год', width: 14, type: 'hours', get: g => g.commute, total: true },
         { header: 'Перебазування, год', width: 15, type: 'hours', get: g => g.travel, total: true },
         { header: 'Перевезення людей, год', width: 13, type: 'hours', get: g => g.transport, total: true },
         { header: 'Заправка, л', width: 11, type: 'liters', get: g => g.fuel, total: true }
@@ -1674,6 +1682,7 @@ function buildObjectReportWorkbook(ExcelJS, { objectNames, from, to, rows, repor
       { header: 'Мотогодини', width: 12, type: 'hours', get: r => r.moto_hours, total: true },
       { header: 'Пробіг, км', width: 11, type: 'km', get: r => r.km, total: true },
       { header: 'Людиногодини', width: 13, type: 'hours', get: r => r.person_hours, total: true },
+      { header: 'Дорога на роботу, год', width: 14, type: 'hours', get: r => r.commute_hours, total: true },
       { header: 'Перебазування, год', width: 15, type: 'hours', get: r => r.travel_hours, total: true },
       { header: 'Перевезення людей, год', width: 13, type: 'hours', get: r => r.transport_hours, total: true },
       { header: 'Простій, год', width: 10, type: 'hours', get: r => r.downtime_hours, total: true },
@@ -1710,6 +1719,8 @@ function buildObjectReportWorkbook(ExcelJS, { objectNames, from, to, rows, repor
       { header: 'Кінець роботи', width: 10, type: 'text', get: r => r.end_time ? formatTimeUA(r.end_time) : '' },
       { header: 'Обід, год', width: 8, type: 'hours', get: r => r.lunch_hours },
       { header: 'Людиногодини', width: 13, type: 'hours', get: r => r.total_person_hours, total: true },
+      { header: 'Дорога на роботу, год', width: 14, type: 'hours', get: r => r.commute_hours, total: true },
+      { header: 'Маршрут дороги на роботу', width: 26, type: 'long', get: r => r.commute_route || '' },
       { header: 'Перебазування, год', width: 15, type: 'hours', get: r => r.travel_hours, total: true },
       { header: 'Маршрут перебазування', width: 28, type: 'long', get: r => r.travel_route || '' },
       { header: 'Перевезення людей, год', width: 12, type: 'hours', get: r => r.transport_hours, total: true },
