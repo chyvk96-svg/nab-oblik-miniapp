@@ -328,7 +328,7 @@ async function loadMyHours(viewer, subject, from, to) {
     reports = await supaGet(
       'daily_reports',
       `operator_id=eq.${subject.id}&work_date=gte.${from}&work_date=lte.${to}&status=neq.Чернетка` +
-      `&select=id,work_date,status,start_time,total_person_hours,travel_hours,transport_hours,equipment(name),objects(name)` +
+      `&select=id,work_date,status,start_time,total_person_hours,commute_hours,travel_hours,transport_hours,equipment(name),objects(name)` +
       `&order=work_date.asc,start_time.asc`
     );
   } catch (e) {
@@ -343,6 +343,7 @@ async function loadMyHours(viewer, subject, from, to) {
 
   const totals = {
     person: round2(sumField(confirmed, 'total_person_hours')),
+    commute: round2(sumField(confirmed, 'commute_hours')),
     travel: round2(sumField(confirmed, 'travel_hours')),
     transport: round2(sumField(confirmed, 'transport_hours')),
     days: new Set(confirmed.map(r => r.work_date)).size,
@@ -370,6 +371,7 @@ async function loadMyHours(viewer, subject, from, to) {
         ${withStatus ? `<span class="status-chip ${statusChipClass(r.status)}" style="font-family:'Space Mono',monospace;font-size:9px;padding:1px 5px;border-radius:3px;display:inline-block;margin-top:3px">${escHtml(r.status)}</span>` : ''}
       </td>
       <td style="${num}">${fmtNum(r.total_person_hours)}</td>
+      <td style="${num}">${Number(r.commute_hours) ? fmtNum(r.commute_hours) : ''}</td>
       <td style="${num}">${Number(r.travel_hours) ? fmtNum(r.travel_hours) : ''}</td>
       <td style="${num}">${Number(r.transport_hours) ? fmtNum(r.transport_hours) : ''}</td>
     </tr>
@@ -380,6 +382,7 @@ async function loadMyHours(viewer, subject, from, to) {
       <th style="${head}">Дата</th>
       <th style="${head}">Об'єкт / техніка</th>
       <th style="${headNum}">Люд.-год</th>
+      <th style="${headNum}">Дор.</th>
       <th style="${headNum}">Переб.</th>
       <th style="${headNum}">Перев.</th>
     </tr>
@@ -398,6 +401,7 @@ async function loadMyHours(viewer, subject, from, to) {
               <div style="font-size:11px;font-weight:400;color:var(--ink-soft)">Робочих днів: ${totals.days}</div>
             </td>
             <td style="${num};border-top:2px solid var(--asphalt)">${fmtNum(totals.person)}</td>
+            <td style="${num};border-top:2px solid var(--asphalt)">${totals.commute ? fmtNum(totals.commute) : ''}</td>
             <td style="${num};border-top:2px solid var(--asphalt)">${totals.travel ? fmtNum(totals.travel) : ''}</td>
             <td style="${num};border-top:2px solid var(--asphalt)">${totals.transport ? fmtNum(totals.transport) : ''}</td>
           </tr>
@@ -423,6 +427,7 @@ async function loadMyHours(viewer, subject, from, to) {
       </div>
       <div class="hours">Людиногодини: <b>${fmtNum(totals.person)}</b></div>
       <div class="detail-row"><span class="label">Робочих днів:</span> ${totals.days}</div>
+      ${totals.commute ? `<div class="detail-row"><span class="label">Дорога на роботу і назад:</span> ${fmtNum(totals.commute)} год</div>` : ''}
       ${totals.travel ? `<div class="detail-row"><span class="label">Перебазування:</span> ${fmtNum(totals.travel)} год</div>` : ''}
       ${totals.transport ? `<div class="detail-row"><span class="label">Перевезення людей:</span> ${fmtNum(totals.transport)} год</div>` : ''}
     </div>
@@ -466,6 +471,7 @@ function buildHoursWorkbook(ExcelJS, user, from, to, confirmed, pending, totals)
     { header: "Об'єкт", width: 38, type: 'long', get: r => r.objects?.name || '' },
     { header: 'Техніка', width: 26, type: 'name', get: r => r.equipment?.name || '' },
     { header: 'Людиногодини', width: 13, type: 'hours', get: r => r.total_person_hours, total: true },
+    { header: 'Дорога на роботу, год', width: 14, type: 'hours', get: r => r.commute_hours, total: true },
     { header: 'Перебазування, год', width: 15, type: 'hours', get: r => r.travel_hours, total: true },
     { header: 'Перевезення людей, год', width: 15, type: 'hours', get: r => r.transport_hours, total: true }
   ];
@@ -528,6 +534,7 @@ function hoursCaption(user, from, to, pending, totals) {
     `📅 ${formatDateUA(from)} – ${formatDateUA(to)}`,
     `✅ Людиногодини: ${fmtNum(totals.person)} · робочих днів: ${totals.days}`
   ];
+  if (totals.commute) lines.push(`🚐 Дорога на роботу і назад: ${fmtNum(totals.commute)} год`);
   if (totals.travel) lines.push(`🚛 Перебазування: ${fmtNum(totals.travel)} год`);
   if (totals.transport) lines.push(`🚌 Перевезення людей: ${fmtNum(totals.transport)} год`);
   if (pending.length > 0) {
