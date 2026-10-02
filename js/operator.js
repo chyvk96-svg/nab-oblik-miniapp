@@ -981,11 +981,12 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
 
         <div class="extra-block hidden" id="travel-block">
           <div class="extra-title">🚗 Перебазування техніки</div>
-          <label>Години</label>
-          <input type="number" step="0.1" id="travel_hours" value="${prefill && prefill.travel_hours ? prefill.travel_hours : ''}">
-          <div class="hint-inline">Години перебазування оплачуються окремо й віднімаються від людиногодин (час роботи вказуй разом із дорогою).</div>
-          <label>Опис маршруту</label>
+          <label>Маршрут</label>
           <input type="text" id="travel_route" placeholder="Звідки → куди" value="${prefill && prefill.travel_route ? escHtml(prefill.travel_route) : ''}">
+          <div class="hint-inline">Пиши «звідки → куди», назву місця — як у списку об'єктів. За маршрутом адміністратор бачить, де зараз техніка.</div>
+          <label>Години (якщо їхав разом із технікою)</label>
+          <input type="number" step="0.1" id="travel_hours" value="${prefill && prefill.travel_hours ? prefill.travel_hours : ''}">
+          <div class="hint-inline">Техніку забрав трал без тебе — години не вказуй, лише маршрут. Якщо їхав сам — години оплачуються окремо й віднімаються від людиногодин (час роботи вказуй разом із дорогою).</div>
         </div>
 
         <div class="extra-block hidden" id="transport-block">
@@ -1522,9 +1523,14 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       if (hasCommute && (!commuteRoute || commuteHours <= 0)) {
         throw new Error('Вкажи маршрут і години дороги на роботу (або вимкни кнопку «Дорога на роботу»).');
       }
+      // Перебазування: маршрут обов'язковий, години — лише якщо оператор їхав
+      // разом із технікою (трал без оператора = 0 год, 2026-10-02)
       const hasTravel = document.getElementById('has_travel').checked;
-      if (hasTravel && !((parseFloat(document.getElementById('travel_hours').value) || 0) > 0)) {
-        throw new Error('Вкажи години перебазування (або вимкни кнопку «Перебазування»).');
+      if (hasTravel && !document.getElementById('travel_route').value.trim()) {
+        throw new Error('Вкажи маршрут перебазування «звідки → куди» (або вимкни кнопку «Перебазування»).');
+      }
+      if (hasTravel && (parseFloat(document.getElementById('travel_hours').value) || 0) < 0) {
+        throw new Error('Години перебазування не можуть бути від\'ємними.');
       }
       const hasDowntime = document.getElementById('has_downtime').checked;
       const downtimeHours = hasDowntime ? (parseFloat(document.getElementById('downtime_hours').value) || 0) : 0;
