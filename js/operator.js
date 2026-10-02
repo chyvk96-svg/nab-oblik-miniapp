@@ -146,7 +146,7 @@ async function renderMyReports(user) {
   const correctionIds = reports.filter(r => r.status === 'Повернено на коригування').map(r => r.id);
   const rejectionComments = await fetchLatestRejectionComments(correctionIds);
   // Виправлення адміністратора: лише змінені поля "було → стало" (2026-10-02)
-  const adminEdits = await fetchAdminEdits(user, reports.map(r => r.id));
+  const adminEdits = await fetchAdminEdits(reports.map(r => r.id));
 
   listEl.className = '';
   listEl.innerHTML = reports.map(r => `
@@ -193,8 +193,10 @@ async function renderMyReports(user) {
 // Кожна правка звіту зберігає в report_edit_log повний стан ДО правки
 // (old_data). Стан ПІСЛЯ правки — це old_data наступного запису журналу
 // (хто б його не зробив) або поточний звіт, якщо правка остання.
-// Показуємо лише правки, зроблені НЕ самим оператором (тобто адміністратором),
-// і лише поля, які справді змінились. Повідомлень у Telegram немає.
+// Показуємо лише правки, зроблені НЕ оператором цього звіту (тобто
+// адміністратором), і лише поля, які справді змінились. Повідомлень у
+// Telegram немає. Той самий блок бачить адміністратор і обліковець у
+// "Непідтверджених" і "Усіх закритих звітах" (admin.js).
 
 const EDIT_DIFF_FIELDS = [
   ['work_date', 'Дата', 'date'],
@@ -248,12 +250,14 @@ function editShowValue(norm, type, names) {
   return norm === '' ? '—' : norm;
 }
 
-// Повертає { report_id: [ { at, changes: [{label, from, to}] }, ... ] }
-async function fetchAdminEdits(user, reportIds) {
-  if (!reportIds || reportIds.length === 0) return {};
+// reportIds — id звітів (null = усі правки в журналі, для довгих списків адміна).
+// Повертає { report_id: [ { at, editor, changes: [{label, fromText, toText}] }, ... ] }
+async function fetchAdminEdits(reportIds) {
+  if (reportIds && reportIds.length === 0) return {};
   let logs, current;
   try {
-    logs = await supaGet('report_edit_log', `report_id=in.(${reportIds.join(',')})&select=*`);
+    logs = await supaGet('report_edit_log',
+      reportIds ? `report_id=in.(${reportIds.join(',')})&select=*` : 'select=*');
     if (!logs || logs.length === 0) return {};
     const editedIds = Array.from(new Set(logs.map(l => l.report_id)));
     current = await supaGet('daily_reports', `id=in.(${editedIds.join(',')})&select=*`);
@@ -273,10 +277,11 @@ async function fetchAdminEdits(user, reportIds) {
   Object.keys(byReport).forEach(reportId => {
     const list = byReport[reportId].sort((a, b) => num(a.id) - num(b.id));
     list.forEach((log, i) => {
-      if (!log.edited_by || log.edited_by === user.id) return; // власні правки оператора не показуємо
+      const cur = currentById[reportId];
+      if (!cur) return; // звіт видалено
+      if (!log.edited_by || log.edited_by === cur.operator_id) return; // власні правки оператора не показуємо
       const before = log.old_data || {};
-      const after = i + 1 < list.length ? (list[i + 1].old_data || {}) : currentById[reportId];
-      if (!after) return;
+      const after = i + 1 < list.length ? (list[i + 1].old_data || {}) : cur;
       const changes = [];
       EDIT_DIFF_FIELDS.forEach(([field, label, type]) => {
         const t = type === 'equipment' || type === 'object' || type === 'date' ? 'text' : type;
@@ -291,6 +296,7 @@ async function fetchAdminEdits(user, reportIds) {
       if (changes.length) {
         (result[reportId] = result[reportId] || []).push({
           at: log.edited_at || log.created_at || null,
+          editorId: log.edited_by,
           changes
         });
       }
@@ -299,14 +305,20 @@ async function fetchAdminEdits(user, reportIds) {
 
   // Назви техніки й об'єктів замість кодів
   const names = {};
+  const editorIds = new Set();
+  Object.values(result).forEach(edits => edits.forEach(ed => editorIds.add(ed.editorId)));
   try {
+    if (editorIds.size) (await supaGet('users', `id=in.(${Array.from(editorIds).join(',')})&select=id,full_name`) || []).forEach(u => { names['user:' + u.id] = u.full_name; });
     if (eqIds.size) (await supaGet('equipment', `id=in.(${Array.from(eqIds).join(',')})&select=id,name`) || []).forEach(e => { names[e.id] = e.name; });
     if (objIds.size) (await supaGet('objects', `id=in.(${Array.from(objIds).join(',')})&select=id,name`) || []).forEach(o => { names[o.id] = o.name; });
   } catch (e) { /* лишаємо коди */ }
-  Object.values(result).forEach(edits => edits.forEach(ed => ed.changes.forEach(c => {
-    c.fromText = editShowValue(c.from, c.type, names);
-    c.toText = editShowValue(c.to, c.type, names);
-  })));
+  Object.values(result).forEach(edits => edits.forEach(ed => {
+    ed.editor = names['user:' + ed.editorId] || '';
+    ed.changes.forEach(c => {
+      c.fromText = editShowValue(c.from, c.type, names);
+      c.toText = editShowValue(c.to, c.type, names);
+    });
+  }));
   return result;
 }
 
@@ -315,7 +327,7 @@ function adminEditsHtml(edits) {
   return edits.map(ed => `
     <div style="margin-top:10px;padding:10px 12px;background:#FFF6CC;border:1px solid var(--line);border-left:4px solid var(--brand-yellow);border-radius:4px">
       <div style="font-family:'Oswald',sans-serif;font-weight:600;font-size:12.5px;letter-spacing:0.03em">
-        ✏️ ВИПРАВЛЕНО АДМІНІСТРАТОРОМ${ed.at ? ` · ${formatDateTimeUA(ed.at)}` : ''}
+        ✏️ ВИПРАВЛЕНО АДМІНІСТРАТОРОМ${ed.editor ? ` (${escHtml(ed.editor)})` : ''}${ed.at ? ` · ${formatDateTimeUA(ed.at)}` : ''}
       </div>
       ${ed.changes.map(c => `
         <div class="detail-row" style="margin-top:4px">
