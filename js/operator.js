@@ -145,6 +145,8 @@ async function renderMyReports(user) {
   // (вона зберігається окремо, в таблиці approvals, а не в самому звіті).
   const correctionIds = reports.filter(r => r.status === 'Повернено на коригування').map(r => r.id);
   const rejectionComments = await fetchLatestRejectionComments(correctionIds);
+  // Виправлення адміністратора: лише змінені поля "було → стало" (2026-10-02)
+  const adminEdits = await fetchAdminEdits(user, reports.map(r => r.id));
 
   listEl.className = '';
   listEl.innerHTML = reports.map(r => `
@@ -154,6 +156,7 @@ async function renderMyReports(user) {
         <span class="status-chip ${statusChipClass(r.status)}">${r.status}</span>
       </div>
       ${reportDetailsHtml(r)}
+      ${adminEditsHtml(adminEdits[r.id])}
       ${r.status === 'Повернено на коригування'
         ? `<div class="discrepancy-box" style="margin-top:10px">
              <div class="flag">⚠ ПРИЧИНА ПОВЕРНЕННЯ НА КОРИГУВАННЯ</div>
@@ -184,6 +187,145 @@ async function renderMyReports(user) {
       }
     });
   });
+}
+
+// ---------- Виправлення адміністратора в "Мої записи" (2026-10-02) ----------
+// Кожна правка звіту зберігає в report_edit_log повний стан ДО правки
+// (old_data). Стан ПІСЛЯ правки — це old_data наступного запису журналу
+// (хто б його не зробив) або поточний звіт, якщо правка остання.
+// Показуємо лише правки, зроблені НЕ самим оператором (тобто адміністратором),
+// і лише поля, які справді змінились. Повідомлень у Telegram немає.
+
+const EDIT_DIFF_FIELDS = [
+  ['work_date', 'Дата', 'date'],
+  ['equipment_id', 'Техніка', 'equipment'],
+  ['object_id', "Об'єкт", 'object'],
+  ['customer_name', 'Замовник', 'text'],
+  ['start_hours', 'Мотогодини, початок', 'num'],
+  ['end_hours', 'Мотогодини, кінець', 'num'],
+  ['start_hours_note', 'Причина розбіжності мотогодин', 'text'],
+  ['start_km', 'Спідометр, початок', 'num'],
+  ['end_km', 'Спідометр, кінець', 'num'],
+  ['start_time', 'Початок роботи', 'time'],
+  ['end_time', 'Кінець роботи', 'time'],
+  ['lunch_hours', 'Обід, год', 'num0'],
+  ['total_person_hours', 'Людиногодини', 'num'],
+  ['commute_hours', 'Дорога на роботу, год', 'num0'],
+  ['commute_route', 'Маршрут дороги на роботу', 'text'],
+  ['travel_hours', 'Перебазування, год', 'num0'],
+  ['travel_route', 'Маршрут перебазування', 'text'],
+  ['transported_people', 'Перевезення людей', 'bool'],
+  ['transport_hours', 'Перевезення людей, год', 'num0'],
+  ['transport_route', 'Маршрут перевезення', 'text'],
+  ['downtime_hours', 'Простій, год', 'num0'],
+  ['downtime_reason', 'Причина простою', 'text'],
+  ['fueling_liters', 'Заправка, л', 'num0'],
+  ['fueling_source', 'Звідки заправка', 'text'],
+  ['has_breakdown', 'Поломка', 'bool'],
+  ['breakdown_description', 'Опис поломки', 'text'],
+  ['repair_hours', 'Ремонт, год', 'num0'],
+  ['operator_note', 'Примітка', 'text']
+];
+
+// Значення для порівняння: однакові за змістом значення дають однаковий рядок
+// (2348 і "2348.0", "08:00:00" і "08:00", null і "" — без зміни; для годин
+// додаткових розділів null = 0).
+function editNormValue(v, type) {
+  if (type === 'num' || type === 'num0') {
+    if (v === null || v === undefined || v === '') return type === 'num0' ? '0' : '';
+    const n = Number(v);
+    return isNaN(n) ? String(v) : String(Math.round(n * 100) / 100);
+  }
+  if (type === 'time') return v ? String(v).slice(0, 5) : '';
+  if (type === 'bool') return v ? 'так' : 'ні';
+  return v === null || v === undefined ? '' : String(v).trim();
+}
+
+function editShowValue(norm, type, names) {
+  if (type === 'equipment' || type === 'object') return norm ? (names[norm] || norm) : '—';
+  if (type === 'date') return norm ? formatDateUA(norm) : '—';
+  if (type === 'num' || type === 'num0') return norm === '' ? '—' : norm.replace('.', ',');
+  return norm === '' ? '—' : norm;
+}
+
+// Повертає { report_id: [ { at, changes: [{label, from, to}] }, ... ] }
+async function fetchAdminEdits(user, reportIds) {
+  if (!reportIds || reportIds.length === 0) return {};
+  let logs, current;
+  try {
+    logs = await supaGet('report_edit_log', `report_id=in.(${reportIds.join(',')})&select=*`);
+    if (!logs || logs.length === 0) return {};
+    const editedIds = Array.from(new Set(logs.map(l => l.report_id)));
+    current = await supaGet('daily_reports', `id=in.(${editedIds.join(',')})&select=*`);
+  } catch (e) {
+    return {}; // допоміжна інформація — без неї записи показуються як звичайно
+  }
+
+  const num = id => parseInt(String(id).replace(/\D/g, ''), 10) || 0;
+  const byReport = {};
+  logs.forEach(l => { (byReport[l.report_id] = byReport[l.report_id] || []).push(l); });
+  const currentById = {};
+  (current || []).forEach(r => { currentById[r.id] = r; });
+
+  const result = {};
+  const eqIds = new Set();
+  const objIds = new Set();
+  Object.keys(byReport).forEach(reportId => {
+    const list = byReport[reportId].sort((a, b) => num(a.id) - num(b.id));
+    list.forEach((log, i) => {
+      if (!log.edited_by || log.edited_by === user.id) return; // власні правки оператора не показуємо
+      const before = log.old_data || {};
+      const after = i + 1 < list.length ? (list[i + 1].old_data || {}) : currentById[reportId];
+      if (!after) return;
+      const changes = [];
+      EDIT_DIFF_FIELDS.forEach(([field, label, type]) => {
+        const t = type === 'equipment' || type === 'object' || type === 'date' ? 'text' : type;
+        const a = editNormValue(before[field], t);
+        const b = editNormValue(after[field], t);
+        if (a !== b) {
+          changes.push({ field, label, type, from: a, to: b });
+          if (type === 'equipment') { if (a) eqIds.add(a); if (b) eqIds.add(b); }
+          if (type === 'object') { if (a) objIds.add(a); if (b) objIds.add(b); }
+        }
+      });
+      if (changes.length) {
+        (result[reportId] = result[reportId] || []).push({
+          at: log.edited_at || log.created_at || null,
+          changes
+        });
+      }
+    });
+  });
+
+  // Назви техніки й об'єктів замість кодів
+  const names = {};
+  try {
+    if (eqIds.size) (await supaGet('equipment', `id=in.(${Array.from(eqIds).join(',')})&select=id,name`) || []).forEach(e => { names[e.id] = e.name; });
+    if (objIds.size) (await supaGet('objects', `id=in.(${Array.from(objIds).join(',')})&select=id,name`) || []).forEach(o => { names[o.id] = o.name; });
+  } catch (e) { /* лишаємо коди */ }
+  Object.values(result).forEach(edits => edits.forEach(ed => ed.changes.forEach(c => {
+    c.fromText = editShowValue(c.from, c.type, names);
+    c.toText = editShowValue(c.to, c.type, names);
+  })));
+  return result;
+}
+
+function adminEditsHtml(edits) {
+  if (!edits || edits.length === 0) return '';
+  return edits.map(ed => `
+    <div style="margin-top:10px;padding:10px 12px;background:#FFF6CC;border:1px solid var(--line);border-left:4px solid var(--brand-yellow);border-radius:4px">
+      <div style="font-family:'Oswald',sans-serif;font-weight:600;font-size:12.5px;letter-spacing:0.03em">
+        ✏️ ВИПРАВЛЕНО АДМІНІСТРАТОРОМ${ed.at ? ` · ${formatDateTimeUA(ed.at)}` : ''}
+      </div>
+      ${ed.changes.map(c => `
+        <div class="detail-row" style="margin-top:4px">
+          <span class="label">${escHtml(c.label)}:</span>
+          <span style="text-decoration:line-through;color:var(--ink-soft)">${escHtml(c.fromText)}</span>
+          → <b>${escHtml(c.toText)}</b>
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
 }
 
 // Повертає мапу { report_id: останній коментар відхилення } для переданого
