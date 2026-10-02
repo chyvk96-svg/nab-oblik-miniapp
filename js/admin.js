@@ -90,6 +90,13 @@ function renderAdminHome(user) {
           <span class="sub">Звіти операторів проти GPS за період</span>
         </span>
       </button>
+      <button class="menu-btn" id="btn-equipment-location">
+        <span class="emoji">📍</span>
+        <span>
+          Де техніка
+          <span class="sub">Остання локація за звітами операторів (перебазування)</span>
+        </span>
+      </button>
       <button class="menu-btn" id="btn-object-report">
         <span class="emoji">🏗️</span>
         <span>
@@ -116,10 +123,139 @@ function renderAdminHome(user) {
   document.getElementById('btn-pending-reports').addEventListener('click', () => renderAdminPendingReports(user));
   document.getElementById('btn-closed-reports').addEventListener('click', () => renderAdminClosedReports(user));
   document.getElementById('btn-wialon-check').addEventListener('click', () => renderWialonCheck(user));
+  document.getElementById('btn-equipment-location').addEventListener('click', () => renderEquipmentLocations(user));
   document.getElementById('btn-object-report').addEventListener('click', () => renderObjectReport(user));
   document.getElementById('btn-operator-hours').addEventListener('click', () => renderOperatorHoursPick(user));
   loadPendingBadge(user);
   loadCompanyPendingBadge();
+}
+
+// ---------- Де техніка (2026-10-02) ----------
+// Остання відома локація кожної техніки — за звітами операторів, не за GPS
+// (GPS є не на всій техніці). Правило для останнього звіту техніки:
+//   є перебазування з маршрутом → місце = куди перебазували (частина
+//   маршруту після останньої стрілки: "База → Пасічна" → "Пасічна";
+//   роздільники →, ->, –, — або " - "; без роздільника — весь маршрут);
+//   інакше → об'єкт цього звіту.
+// Чернетки не враховуються. Беремо звіти за LOC_DAYS днів; історія в
+// картці — за останні LOC_HISTORY_DAYS днів. Техніка без звітів за цей
+// час — окремим блоком унизу.
+
+const LOC_DAYS = 60;
+const LOC_HISTORY_DAYS = 14;
+
+function travelDestination(route) {
+  const parts = String(route || '').split(/\s*(?:→|->|—|–)\s*|\s+-\s+/).map(x => x.trim()).filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
+// Місце за одним звітом: { place, moved, route }
+function reportLocation(r) {
+  const moved = Number(r.travel_hours) > 0 && String(r.travel_route || '').trim() !== '';
+  if (moved) return { place: travelDestination(r.travel_route), moved: true, route: r.travel_route };
+  return { place: r.objects?.name || '—', moved: false, route: null };
+}
+
+async function renderEquipmentLocations(user) {
+  app.innerHTML = `
+    ${topbarHtml('Де техніка', roleSubtitle(user))}
+    <div class="wrap" style="padding-top:14px">
+      <div class="back-link" id="back-to-menu-loc" style="margin:0 0 14px">← Назад до меню</div>
+      <div class="hint-inline" style="margin:0 0 12px">За останнім звітом кожної техніки: куди її перебазували, а якщо перебазування не було — об'єкт звіту. Це дані зі звітів операторів, не GPS.</div>
+      <div id="loc-list" class="msg">Завантаження...</div>
+    </div>
+  `;
+  document.getElementById('back-to-menu-loc').addEventListener('click', () => renderAdminHome(user));
+  const listEl = document.getElementById('loc-list');
+
+  const from = new Date();
+  from.setDate(from.getDate() - LOC_DAYS);
+  let reports, equipmentList;
+  try {
+    reports = await supaGet('daily_reports',
+      `work_date=gte.${isoDateLocal(from)}&status=neq.Чернетка` +
+      `&select=id,work_date,end_time,status,equipment_id,travel_hours,travel_route,objects(name),users!daily_reports_operator_id_fkey(full_name)` +
+      `&order=work_date.desc,end_time.desc.nullslast,id.desc`);
+    equipmentList = await supaGet('equipment', `status=eq.Активна&select=id,name&order=name.asc`);
+  } catch (e) {
+    listEl.textContent = 'Помилка завантаження: ' + e.message;
+    return;
+  }
+
+  const byEq = new Map();
+  (reports || []).forEach(r => {
+    if (!byEq.has(r.equipment_id)) byEq.set(r.equipment_id, []);
+    byEq.get(r.equipment_id).push(r); // уже від найновішого до найстарішого
+  });
+
+  const histFrom = new Date();
+  histFrom.setDate(histFrom.getDate() - LOC_HISTORY_DAYS);
+  const histFromIso = isoDateLocal(histFrom);
+
+  const rows = [];
+  const noReports = [];
+  (equipmentList || []).forEach(eq => {
+    const list = byEq.get(eq.id);
+    if (!list || list.length === 0) { noReports.push(eq); return; }
+    const last = list[0];
+    const loc = reportLocation(last);
+    rows.push({ eq, last, loc, history: list.filter(r => r.work_date >= histFromIso) });
+  });
+
+  if (rows.length === 0 && noReports.length === 0) {
+    listEl.textContent = 'Активної техніки немає.';
+    return;
+  }
+
+  // Групи за місцем, усередині — за назвою техніки
+  const groups = new Map();
+  rows.forEach(x => {
+    if (!groups.has(x.loc.place)) groups.set(x.loc.place, []);
+    groups.get(x.loc.place).push(x);
+  });
+  const places = Array.from(groups.keys()).sort((a, b) => a.localeCompare(b, 'uk'));
+
+  const historyHtml = list => list.map(r => {
+    const l = reportLocation(r);
+    return `<div class="detail-row" style="font-size:12.5px">
+      <b>${formatDateUA(r.work_date).slice(0, 5)}</b> · ${escHtml(r.objects?.name || '—')}
+      ${l.moved ? `<div style="color:var(--caution)">🚗 перебазування: ${escHtml(l.route)}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  listEl.className = '';
+  listEl.innerHTML = places.map(place => `
+    <div style="margin:16px 0 8px;font-family:'Oswald',sans-serif;font-weight:600;font-size:15px;text-transform:uppercase;letter-spacing:0.02em">
+      📍 ${escHtml(place)} <span style="color:var(--ink-soft);font-weight:500">· ${groups.get(place).length}</span>
+    </div>
+    ${groups.get(place).sort((a, b) => String(a.eq.name).localeCompare(String(b.eq.name), 'uk')).map(x => `
+      <div class="report-card">
+        <div class="top-row">
+          <span class="date">${escHtml(x.eq.name)}</span>
+          ${x.loc.moved ? '<span class="status-chip status-wait">перебазовано</span>' : ''}
+        </div>
+        <div class="meta">Останній звіт: ${formatDateUA(x.last.work_date)} · ${escHtml(x.last.users?.full_name || '—')}</div>
+        ${x.loc.moved ? `<div class="detail-row"><span class="label">Маршрут:</span> ${escHtml(x.loc.route)}</div>` : ''}
+        ${x.history.length > 1 ? `
+          <button type="button" class="btn-reject" style="width:100%;margin-top:8px;padding:8px" data-loc-hist="${escHtml(x.eq.id)}">Історія за ${LOC_HISTORY_DAYS} днів ▾</button>
+          <div class="hidden" id="loc-hist-${escHtml(x.eq.id)}" style="margin-top:6px">${historyHtml(x.history)}</div>
+        ` : ''}
+      </div>
+    `).join('')}
+  `).join('') + (noReports.length ? `
+    <div style="margin:20px 0 8px;font-family:'Oswald',sans-serif;font-weight:600;font-size:15px;text-transform:uppercase;color:var(--ink-soft)">
+      Без звітів за ${LOC_DAYS} днів · ${noReports.length}
+    </div>
+    <div class="report-card">${noReports.map(eq => `<div class="detail-row">${escHtml(eq.name)}</div>`).join('')}</div>
+  ` : '');
+
+  listEl.querySelectorAll('[data-loc-hist]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const box = document.getElementById('loc-hist-' + btn.dataset.locHist);
+      const nowHidden = box.classList.toggle('hidden');
+      btn.textContent = `${nowHidden ? 'Історія' : 'Сховати'} за ${LOC_HISTORY_DAYS} днів ${nowHidden ? '▾' : '▴'}`;
+    });
+  });
 }
 
 // ---------- Години оператора: вибір оператора / водія ----------
@@ -370,7 +506,7 @@ function findDuplicateIds(reports) {
   return dup;
 }
 
-function adminReportCardHtml(r, user, duplicates) {
+function adminReportCardHtml(r, user, duplicates, edits) {
   const dups = duplicates[r.id];
   return `
     <div class="report-card" data-report-card="${r.id}">
@@ -380,6 +516,7 @@ function adminReportCardHtml(r, user, duplicates) {
       </div>
       ${dups ? `<div class="discrepancy-box" style="margin:6px 0 8px;padding:6px 10px"><div class="flag" style="margin:0">⚠ СХОЖЕ НА ДУБЛЬ: ${dups.join(', ')}</div></div>` : ''}
       ${reportDetailsHtml(r)}
+      ${edits ? adminEditsHtml(edits[r.id]) : ''}
       ${isAdminUser(user) ? `
         <div class="approval-actions">
           <button type="button" class="btn-confirm" data-admin-edit="${r.id}">✏️ Редагувати</button>
@@ -482,7 +619,8 @@ async function renderAdminPendingReports(user) {
 
   listEl.className = '';
   const duplicates = findDuplicateIds(reports);
-  listEl.innerHTML = reports.map(r => adminReportCardHtml(r, user, duplicates)).join('');
+  const edits = await fetchAdminEdits(reports.map(r => r.id)); // виправлення адміністратора (operator.js)
+  listEl.innerHTML = reports.map(r => adminReportCardHtml(r, user, duplicates, edits)).join('');
   wireAdminReportActions(listEl, user, reports, () => renderAdminPendingReports(user));
 }
 
@@ -533,6 +671,7 @@ async function renderAdminClosedReports(user, filters) {
   }
 
   const duplicates = findDuplicateIds(reports);
+  const edits = await fetchAdminEdits(null); // усі виправлення з журналу (operator.js)
   const daySel = document.getElementById('closed-day');
   const objSel = document.getElementById('closed-object');
   const countEl = document.getElementById('closed-count');
@@ -573,7 +712,7 @@ async function renderAdminClosedReports(user, filters) {
       return;
     }
     listEl.className = '';
-    listEl.innerHTML = shown.map(r => adminReportCardHtml(r, user, duplicates)).join('');
+    listEl.innerHTML = shown.map(r => adminReportCardHtml(r, user, duplicates, edits)).join('');
     wireAdminReportActions(listEl, user, reports,
       () => renderAdminClosedReports(user, { day: daySel.value, object: objSel.value }));
   }
