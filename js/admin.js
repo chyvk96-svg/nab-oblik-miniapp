@@ -133,7 +133,8 @@ function renderAdminHome(user) {
 // ---------- Де техніка (2026-10-02) ----------
 // Остання відома локація кожної техніки — за звітами операторів, не за GPS
 // (GPS є не на всій техніці). Правило для останнього звіту техніки:
-//   є перебазування з маршрутом → місце = куди перебазували (частина
+//   вказано маршрут перебазування (з годинами чи без — без годин означає,
+//   що техніку забрав трал без оператора) → місце = куди перебазували (частина
 //   маршруту після останньої стрілки: "База → Пасічна" → "Пасічна";
 //   роздільники →, ->, –, — або " - "; без роздільника — весь маршрут);
 //   інакше → об'єкт цього звіту.
@@ -151,9 +152,12 @@ function travelDestination(route) {
 
 // Місце за одним звітом: { place, moved, route }
 function reportLocation(r) {
-  const moved = Number(r.travel_hours) > 0 && String(r.travel_route || '').trim() !== '';
-  if (moved) return { place: travelDestination(r.travel_route), moved: true, route: r.travel_route };
-  return { place: r.objects?.name || '—', moved: false, route: null };
+  const moved = String(r.travel_route || '').trim() !== '';
+  if (moved) {
+    return { place: travelDestination(r.travel_route), moved: true, route: r.travel_route,
+      byTrailer: !(Number(r.travel_hours) > 0) };
+  }
+  return { place: r.objects?.name || '—', moved: false, route: null, byTrailer: false };
 }
 
 async function renderEquipmentLocations(user) {
@@ -219,7 +223,7 @@ async function renderEquipmentLocations(user) {
     const l = reportLocation(r);
     return `<div class="detail-row" style="font-size:12.5px">
       <b>${formatDateUA(r.work_date).slice(0, 5)}</b> · ${escHtml(r.objects?.name || '—')}
-      ${l.moved ? `<div style="color:var(--caution)">🚗 перебазування: ${escHtml(l.route)}</div>` : ''}
+      ${l.moved ? `<div style="color:var(--caution)">${l.byTrailer ? '🚛 трал' : '🚗 перебазування'}: ${escHtml(l.route)}</div>` : ''}
     </div>`;
   }).join('');
 
@@ -232,7 +236,7 @@ async function renderEquipmentLocations(user) {
       <div class="report-card">
         <div class="top-row">
           <span class="date">${escHtml(x.eq.name)}</span>
-          ${x.loc.moved ? '<span class="status-chip status-wait">перебазовано</span>' : ''}
+          ${x.loc.moved ? `<span class="status-chip status-wait">${x.loc.byTrailer ? 'трал' : 'перебазовано'}</span>` : ''}
         </div>
         <div class="meta">Останній звіт: ${formatDateUA(x.last.work_date)} · ${escHtml(x.last.users?.full_name || '—')}</div>
         ${x.loc.moved ? `<div class="detail-row"><span class="label">Маршрут:</span> ${escHtml(x.loc.route)}</div>` : ''}
