@@ -405,6 +405,30 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
+// Ремонт, що оплачується окремо: лише понад 0,5 год (так само, як він
+// віднімається від роботи у формі). Короткий ремонт уже входить у роботу.
+function paidRepairHours(r) {
+  const v = Number(r.repair_hours) || 0;
+  return v > 0.5 ? v : 0;
+}
+
+// Усього годин за звіт (з 2026-10-03): робота на об'єкті + дорога на роботу
+// + перебазування + перевезення людей + ремонт (> 0,5). Простій — лише для
+// інформації, не додається.
+function reportTotalHours(r) {
+  return round2(
+    (Number(r.total_person_hours) || 0) +
+    (Number(r.commute_hours) || 0) +
+    (Number(r.travel_hours) || 0) +
+    (Number(r.transport_hours) || 0) +
+    paidRepairHours(r)
+  );
+}
+
+function sumBy(rows, fn) {
+  return rows.reduce((acc, r) => acc + (Number(fn(r)) || 0), 0);
+}
+
 function renderMyHours(user) {
   renderHoursScreen({ viewer: user, subject: user, onBack: () => renderOperatorHome(user) });
 }
@@ -482,7 +506,7 @@ async function loadMyHours(viewer, subject, from, to) {
     reports = await supaGet(
       'daily_reports',
       `operator_id=eq.${subject.id}&work_date=gte.${from}&work_date=lte.${to}&status=neq.Чернетка` +
-      `&select=id,work_date,status,start_time,total_person_hours,commute_hours,travel_hours,transport_hours,equipment(name),objects(name)` +
+      `&select=id,work_date,status,start_time,total_person_hours,commute_hours,travel_hours,transport_hours,repair_hours,downtime_hours,equipment(name),objects(name)` +
       `&order=work_date.asc,start_time.asc`
     );
   } catch (e) {
@@ -500,8 +524,12 @@ async function loadMyHours(viewer, subject, from, to) {
     commute: round2(sumField(confirmed, 'commute_hours')),
     travel: round2(sumField(confirmed, 'travel_hours')),
     transport: round2(sumField(confirmed, 'transport_hours')),
+    repair: round2(sumBy(confirmed, paidRepairHours)),
+    downtime: round2(sumField(confirmed, 'downtime_hours')),
+    total: round2(sumBy(confirmed, reportTotalHours)),
     days: new Set(confirmed.map(r => r.work_date)).size,
-    pendingPerson: round2(sumField(pending, 'total_person_hours'))
+    pendingPerson: round2(sumField(pending, 'total_person_hours')),
+    pendingTotal: round2(sumBy(pending, reportTotalHours))
   };
 
   resultEl.className = '';
@@ -511,10 +539,13 @@ async function loadMyHours(viewer, subject, from, to) {
     return;
   }
 
-  const cell = 'padding:6px 4px;border-bottom:1px solid var(--line);vertical-align:top';
-  const num = cell + ';text-align:right;font-family:\'Space Mono\',monospace;white-space:nowrap';
-  const head = 'padding:6px 4px;border-bottom:2px solid var(--asphalt);font-family:Oswald,sans-serif;font-weight:600;font-size:11px;text-transform:uppercase;text-align:left';
+  const cell = 'padding:5px 2px;border-bottom:1px solid var(--line);vertical-align:top';
+  const num = cell + ';text-align:right;font-family:\'Space Mono\',monospace;white-space:nowrap;font-size:10.5px';
+  const totalCol = ';font-weight:700;background:rgba(245,196,0,0.18)';
+  const softCol = ';color:var(--ink-soft)';
+  const head = 'padding:5px 2px;border-bottom:2px solid var(--asphalt);font-family:Oswald,sans-serif;font-weight:600;font-size:9.5px;letter-spacing:-0.2px;text-transform:uppercase;text-align:left';
   const headNum = head + ';text-align:right';
+  const hv = v => Number(v) ? fmtNum(v) : '';
 
   const rowHtml = (r, withStatus) => `
     <tr>
@@ -525,9 +556,12 @@ async function loadMyHours(viewer, subject, from, to) {
         ${withStatus ? `<span class="status-chip ${statusChipClass(r.status)}" style="font-family:'Space Mono',monospace;font-size:9px;padding:1px 5px;border-radius:3px;display:inline-block;margin-top:3px">${escHtml(r.status)}</span>` : ''}
       </td>
       <td style="${num}">${fmtNum(r.total_person_hours)}</td>
-      <td style="${num}">${Number(r.commute_hours) ? fmtNum(r.commute_hours) : ''}</td>
-      <td style="${num}">${Number(r.travel_hours) ? fmtNum(r.travel_hours) : ''}</td>
-      <td style="${num}">${Number(r.transport_hours) ? fmtNum(r.transport_hours) : ''}</td>
+      <td style="${num}">${hv(r.commute_hours)}</td>
+      <td style="${num}">${hv(r.travel_hours)}</td>
+      <td style="${num}">${hv(r.transport_hours)}</td>
+      <td style="${num}">${hv(paidRepairHours(r))}</td>
+      <td style="${num}${totalCol}">${fmtNum(reportTotalHours(r))}</td>
+      <td style="${num}${softCol}">${hv(r.downtime_hours)}</td>
     </tr>
   `;
 
@@ -535,17 +569,21 @@ async function loadMyHours(viewer, subject, from, to) {
     <tr>
       <th style="${head}">Дата</th>
       <th style="${head}">Об'єкт / техніка</th>
-      <th style="${headNum}">Люд.-год</th>
+      <th style="${headNum}">Роб.</th>
       <th style="${headNum}">Дор.</th>
       <th style="${headNum}">Переб.</th>
       <th style="${headNum}">Перев.</th>
+      <th style="${headNum}">Рем.</th>
+      <th style="${headNum}${totalCol}">Усього</th>
+      <th style="${headNum}${softCol}">Прост.</th>
     </tr>
   `;
 
   const confirmedHtml = confirmed.length === 0
     ? `<div class="hint-inline" style="margin:8px 0 0">Підтверджених звітів за цей період ще немає.</div>`
     : `
-      <table style="width:100%;border-collapse:collapse;font-size:12.5px;background:#fff">
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff">
         <thead>${tableHead}</thead>
         <tbody>${confirmed.map(r => rowHtml(r, false)).join('')}</tbody>
         <tfoot>
@@ -555,22 +593,28 @@ async function loadMyHours(viewer, subject, from, to) {
               <div style="font-size:11px;font-weight:400;color:var(--ink-soft)">Робочих днів: ${totals.days}</div>
             </td>
             <td style="${num};border-top:2px solid var(--asphalt)">${fmtNum(totals.person)}</td>
-            <td style="${num};border-top:2px solid var(--asphalt)">${totals.commute ? fmtNum(totals.commute) : ''}</td>
-            <td style="${num};border-top:2px solid var(--asphalt)">${totals.travel ? fmtNum(totals.travel) : ''}</td>
-            <td style="${num};border-top:2px solid var(--asphalt)">${totals.transport ? fmtNum(totals.transport) : ''}</td>
+            <td style="${num};border-top:2px solid var(--asphalt)">${hv(totals.commute)}</td>
+            <td style="${num};border-top:2px solid var(--asphalt)">${hv(totals.travel)}</td>
+            <td style="${num};border-top:2px solid var(--asphalt)">${hv(totals.transport)}</td>
+            <td style="${num};border-top:2px solid var(--asphalt)">${hv(totals.repair)}</td>
+            <td style="${num};border-top:2px solid var(--asphalt)${totalCol}">${fmtNum(totals.total)}</td>
+            <td style="${num};border-top:2px solid var(--asphalt)${softCol}">${hv(totals.downtime)}</td>
           </tr>
         </tfoot>
       </table>
+      </div>
     `;
 
   const pendingHtml = pending.length === 0 ? '' : `
     <div class="discrepancy-box" style="margin-top:16px">
-      <div class="flag">⏳ ЩЕ НЕ ЗАРАХОВАНО (${pending.length}) · ${fmtNum(totals.pendingPerson)} люд.-год</div>
+      <div class="flag">⏳ ЩЕ НЕ ЗАРАХОВАНО (${pending.length}) · усього ${fmtNum(totals.pendingTotal)} год</div>
       <div class="hint-inline" style="margin:0 0 6px">Ці звіти ще не підтверджені — у "Разом" не входять.</div>
-      <table style="width:100%;border-collapse:collapse;font-size:12.5px;background:#fff">
+      <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;background:#fff">
         <thead>${tableHead}</thead>
         <tbody>${pending.map(r => rowHtml(r, true)).join('')}</tbody>
       </table>
+      </div>
     </div>
   `;
 
@@ -579,11 +623,15 @@ async function loadMyHours(viewer, subject, from, to) {
       <div class="top-row">
         <span class="date">${formatDateUA(from)} – ${formatDateUA(to)}</span>
       </div>
-      <div class="hours">Людиногодини: <b>${fmtNum(totals.person)}</b></div>
+      <div class="hours">Усього годин: <b>${fmtNum(totals.total)}</b></div>
       <div class="detail-row"><span class="label">Робочих днів:</span> ${totals.days}</div>
+      <div class="detail-row"><span class="label">Робота на об'єкті:</span> ${fmtNum(totals.person)} год</div>
       ${totals.commute ? `<div class="detail-row"><span class="label">Дорога на роботу і назад:</span> ${fmtNum(totals.commute)} год</div>` : ''}
       ${totals.travel ? `<div class="detail-row"><span class="label">Перебазування:</span> ${fmtNum(totals.travel)} год</div>` : ''}
       ${totals.transport ? `<div class="detail-row"><span class="label">Перевезення людей:</span> ${fmtNum(totals.transport)} год</div>` : ''}
+      ${totals.repair ? `<div class="detail-row"><span class="label">Ремонт:</span> ${fmtNum(totals.repair)} год</div>` : ''}
+      ${totals.downtime ? `<div class="detail-row" style="color:var(--ink-soft)"><span class="label">Простій (для інформації, в «Усього» не входить):</span> ${fmtNum(totals.downtime)} год</div>` : ''}
+      <div class="hint-inline" style="margin:6px 0 0">Усього = робота + дорога + перебазування + перевезення людей + ремонт (понад 0,5 год).</div>
     </div>
     ${confirmedHtml}
     ${pendingHtml}
@@ -624,10 +672,13 @@ function buildHoursWorkbook(ExcelJS, user, from, to, confirmed, pending, totals)
     { header: 'Дата', width: 12, type: 'date', get: r => r.work_date },
     { header: "Об'єкт", width: 38, type: 'long', get: r => r.objects?.name || '' },
     { header: 'Техніка', width: 26, type: 'name', get: r => r.equipment?.name || '' },
-    { header: 'Людиногодини', width: 13, type: 'hours', get: r => r.total_person_hours, total: true },
+    { header: "Робота на об'єкті, год", width: 13, type: 'hours', get: r => r.total_person_hours, total: true },
     { header: 'Дорога на роботу, год', width: 14, type: 'hours', get: r => r.commute_hours, total: true },
     { header: 'Перебазування, год', width: 15, type: 'hours', get: r => r.travel_hours, total: true },
-    { header: 'Перевезення людей, год', width: 15, type: 'hours', get: r => r.transport_hours, total: true }
+    { header: 'Перевезення людей, год', width: 15, type: 'hours', get: r => r.transport_hours, total: true },
+    { header: 'Ремонт (понад 0,5), год', width: 13, type: 'hours', get: r => paidRepairHours(r), total: true },
+    { header: 'УСЬОГО, год', width: 12, type: 'hours', get: r => reportTotalHours(r), total: true, fillOf: () => 'FFFFF2B3' },
+    { header: 'Простій (інфо, не входить в усього), год', width: 16, type: 'hours', get: r => r.downtime_hours, total: true }
   ];
   const pendingColumns = baseColumns.concat([
     { header: 'Статус', width: 23, type: 'status', get: r => r.status }
@@ -686,13 +737,16 @@ function hoursCaption(user, from, to, pending, totals) {
   const lines = [
     `🕒 Відомість годин: ${user.full_name}`,
     `📅 ${formatDateUA(from)} – ${formatDateUA(to)}`,
-    `✅ Людиногодини: ${fmtNum(totals.person)} · робочих днів: ${totals.days}`
+    `✅ Усього годин: ${fmtNum(totals.total)} · робочих днів: ${totals.days}`,
+    `🏗️ Робота на об'єкті: ${fmtNum(totals.person)} год`
   ];
   if (totals.commute) lines.push(`🚐 Дорога на роботу і назад: ${fmtNum(totals.commute)} год`);
   if (totals.travel) lines.push(`🚛 Перебазування: ${fmtNum(totals.travel)} год`);
   if (totals.transport) lines.push(`🚌 Перевезення людей: ${fmtNum(totals.transport)} год`);
+  if (totals.repair) lines.push(`🔧 Ремонт: ${fmtNum(totals.repair)} год`);
+  if (totals.downtime) lines.push(`⏸ Простій (інфо, в усього не входить): ${fmtNum(totals.downtime)} год`);
   if (pending.length > 0) {
-    lines.push(`⏳ Ще не зараховано: ${pending.length} звіт(и), ${fmtNum(totals.pendingPerson)} люд.-год`);
+    lines.push(`⏳ Ще не зараховано: ${pending.length} звіт(и), усього ${fmtNum(totals.pendingTotal)} год`);
   }
   return lines.join('\n');
 }
@@ -949,6 +1003,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
           </div>
         </div>
         <div class="hint-inline">Вводь час вручну у форматі ГГ:ХВ, наприклад 07:45</div>
+        <div class="hint-inline"><b>Тільки робота на об'єкті:</b> коли почав і коли закінчив на об'єкті. Дорогу, перебазування і перевезення людей сюди не включай — їх вкажи окремо нижче.</div>
         <label>Обід, год</label>
         <input type="number" step="0.1" id="lunch_hours" value="${prefill ? prefill.lunch_hours : '0'}">
       </div>
@@ -976,7 +1031,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
           <input type="text" id="commute_route" placeholder="Звідки → куди, напр. Надвірна → Пасічна" value="${prefill && prefill.commute_route ? escHtml(prefill.commute_route) : ''}">
           <label>Години (туди й назад разом)</label>
           <input type="number" step="0.1" id="commute_hours" value="${prefill && prefill.commute_hours ? prefill.commute_hours : ''}">
-          <div class="hint-inline">Час роботи вказуй разом із дорогою — години дороги віднімаються від людиногодин і рахуються окремо.</div>
+          <div class="hint-inline">Години дороги рахуються окремо від роботи на об'єкті.</div>
         </div>
 
         <div class="extra-block hidden" id="travel-block">
@@ -986,7 +1041,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
           <div class="hint-inline">Пиши «звідки → куди», назву місця — як у списку об'єктів. За маршрутом адміністратор бачить, де зараз техніка.</div>
           <label>Години (якщо їхав разом із технікою)</label>
           <input type="number" step="0.1" id="travel_hours" value="${prefill && prefill.travel_hours ? prefill.travel_hours : ''}">
-          <div class="hint-inline">Техніку забрав трал без тебе — години не вказуй, лише маршрут. Якщо їхав сам — години оплачуються окремо й віднімаються від людиногодин (час роботи вказуй разом із дорогою).</div>
+          <div class="hint-inline">Техніку забрав трал без тебе — години не вказуй, лише маршрут. Якщо їхав разом із технікою — вкажи години, вони рахуються окремо від роботи на об'єкті.</div>
         </div>
 
         <div class="extra-block hidden" id="transport-block">
@@ -995,6 +1050,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
           <input type="text" id="transport_route" placeholder="Звідки → куди" value="${prefill && prefill.transport_route ? escHtml(prefill.transport_route) : ''}">
           <label>Години</label>
           <input type="number" step="0.1" id="transport_hours" value="${prefill && prefill.transport_hours ? prefill.transport_hours : ''}">
+          <div class="hint-inline">Години перевезення рахуються окремо від роботи на об'єкті.</div>
         </div>
 
         <div class="extra-block hidden" id="downtime-block">
@@ -1003,6 +1059,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
           <input type="number" step="0.1" id="downtime_hours" value="${prefill && prefill.downtime_hours ? prefill.downtime_hours : ''}">
           <label>Причина</label>
           <input type="text" id="downtime_reason" value="${prefill && prefill.downtime_reason ? escHtml(prefill.downtime_reason) : ''}">
+          <div class="hint-inline">Простій записується для інформації — від годин нічого не віднімається.</div>
         </div>
       </div>
 
@@ -1023,6 +1080,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
           <textarea id="breakdown_description" placeholder="Що сталось, який вузол/компонент">${prefill && prefill.breakdown_description ? prefill.breakdown_description : ''}</textarea>
           <label>Ремонт, год</label>
           <input type="number" step="0.1" id="repair_hours" value="${prefill ? (prefill.repair_hours || 0) : '0'}">
+          <div class="hint-inline">Ремонт понад 0,5 год віднімається від роботи на об'єкті й рахується окремо.</div>
         </div>
       </div>
 
@@ -1550,21 +1608,21 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       submitBtn.textContent = 'Перевірка...';
       const lunchHours = parseFloat(document.getElementById('lunch_hours').value) || 0;
       const repairHours = hasBreakdown ? (parseFloat(document.getElementById('repair_hours')?.value) || 0) : 0;
-      // Ремонт понад 30 хв повністю віднімається від загальних (людино)годин
+      // Ремонт понад 30 хв повністю віднімається від роботи на об'єкті
+      // (він стається всередині часу на об'єкті) і рахується окремо
       const repairDeduction = repairHours > 0.5 ? repairHours : 0;
-      // Перебазування техніки оплачується окремо: час роботи оператор вказує
-      // разом із дорогою, тому години перебазування віднімаються (2026-09-25)
+      // Схема з 2026-10-03: час роботи = лише робота на об'єкті. Дорога на
+      // роботу, перебазування і перевезення людей вказуються окремо й НЕ
+      // віднімаються; простій — лише для інформації.
       const travelHours = hasTravel ? (parseFloat(document.getElementById('travel_hours').value) || 0) : 0;
-      // Дорога на роботу і назад (бусом) — так само: час роботи вказується
-      // разом із дорогою, години дороги віднімаються й рахуються окремо (2026-09-30)
 
       const [sh, sm] = startTime.split(':').map(Number);
       const [eh, em] = endTime.split(':').map(Number);
       let diffHours = (eh + em / 60) - (sh + sm / 60);
       if (diffHours < 0) diffHours += 24;
-      const totalPersonHours = Math.round((diffHours - lunchHours - repairDeduction - travelHours - commuteHours) * 100) / 100;
+      const totalPersonHours = Math.round((diffHours - lunchHours - repairDeduction) * 100) / 100;
       if (totalPersonHours < 0) {
-        throw new Error('Обід, ремонт, перебазування і дорога на роботу разом більші за час роботи — перевір години.');
+        throw new Error('Обід і ремонт разом більші за час роботи на об\'єкті — перевір години.');
       }
 
       const payload = {
