@@ -499,6 +499,14 @@ async function renderEditObject(user, objectId) {
         </div>
       ` : ''}
     </div>
+
+    ${user.role === 'Адміністратор' ? `
+      <div class="section">
+        <div class="section-title"><span class="n">3</span><span class="icon">🗑</span>Видалення об'єкта</div>
+        <div class="hint-inline">Лише для випадково створених об'єктів, по яких немає жодного поданого звіту. Разом з об'єктом видаляються чернетки операторів, записи відповідальних і замовник, якщо він більше ніде не використовується. Дію не можна скасувати.</div>
+        <button type="button" class="btn-reject" id="btn-delete-object" style="width:100%;margin-top:12px;padding:12px">🗑 Видалити назавжди</button>
+      </div>
+    ` : ''}
   `;
 
   const form = document.getElementById('edit-object-form');
@@ -611,6 +619,84 @@ async function renderEditObject(user, objectId) {
         addRespBtn.textContent = '+ Додати';
       }
     });
+  }
+
+  const deleteObjectBtn = document.getElementById('btn-delete-object');
+  if (deleteObjectBtn) {
+    deleteObjectBtn.addEventListener('click', () => deleteObjectCompletely(user, objectId, deleteObjectBtn));
+  }
+}
+
+// ---------- Видалення об'єкта назавжди (лише адміністратор, з 2026-10-12) ----------
+// Усю роботу робить функція Supabase delete_object_completely
+// (delete_object_migration.sql): перевіряє роль, блокує, якщо є подані
+// звіти, і видаляє все однією транзакцією. Спершу — пробний запуск
+// (p_dry_run), щоб показати у вікні підтвердження, що саме буде видалено.
+
+async function deleteObjectCompletely(user, objectId, btn) {
+  const originalLabel = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Перевірка...';
+
+  const restoreBtn = () => {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  };
+
+  let preview;
+  try {
+    preview = await supaRpc('delete_object_completely', {
+      p_object_id: objectId,
+      p_user_id: user.id,
+      p_dry_run: true
+    });
+  } catch (e) {
+    alert("Не вдалось перевірити об'єкт. Переконайтесь, що в Supabase виконано delete_object_migration.sql.\n\n" + e.message);
+    restoreBtn();
+    return;
+  }
+
+  if (!preview || !preview.ok) {
+    alert((preview && preview.message) || "Цей об'єкт видалити не можна.");
+    restoreBtn();
+    return;
+  }
+
+  const lines = [];
+  if (preview.drafts > 0) lines.push(`• чернеток операторів: ${preview.drafts}`);
+  if (preview.responsible > 0) lines.push(`• записів відповідальних: ${preview.responsible}`);
+  if (preview.incidents > 0) lines.push(`• поломок: ${preview.incidents}`);
+  if (preview.customer_deleted && preview.customer_name) {
+    lines.push(`• замовника «${preview.customer_name}» (більше ніде не використовується)`);
+  }
+
+  const confirmText =
+    `Видалити об'єкт «${preview.object_name}» назавжди?` +
+    (lines.length ? `\n\nРазом з ним буде видалено:\n${lines.join('\n')}` : '') +
+    `\n\nЦе не можна скасувати.`;
+
+  if (!confirm(confirmText)) {
+    restoreBtn();
+    return;
+  }
+
+  btn.textContent = 'Видалення...';
+  try {
+    const result = await supaRpc('delete_object_completely', {
+      p_object_id: objectId,
+      p_user_id: user.id,
+      p_dry_run: false
+    });
+    if (!result || !result.ok) {
+      alert((result && result.message) || "Цей об'єкт видалити не можна.");
+      restoreBtn();
+      return;
+    }
+    alert(`Об'єкт «${result.object_name}» видалено.`);
+    renderManageObjects(user);
+  } catch (e) {
+    alert("Не вдалось видалити об'єкт: " + e.message);
+    restoreBtn();
   }
 }
 
