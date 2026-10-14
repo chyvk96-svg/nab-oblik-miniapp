@@ -847,7 +847,14 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       myEquipment = (allEq || [])
         .filter(e => e.status === 'Активна' || (existingReport && e.id === existingReport.equipment_id))
         .map(e => ({ equipment_id: e.id, equipment: e }));
-      objects = await supaGet('objects', `select=id,name,customer_id,customers(name),status&order=name.asc`);
+      // Об'єкти — так само: лише активні + об'єкт самого звіту, навіть якщо
+      // його вже деактивовано чи закрито (з 2026-10-12; раніше показувались усі)
+      const allObj = await supaGet('objects', `select=id,name,customer_id,customers(name),status&order=name.asc`);
+      objects = (allObj || [])
+        .filter(o => o.status === 'Активний' || (existingReport && o.id === existingReport.object_id))
+        .map(o => (o.status === 'Активний'
+          ? o
+          : { ...o, name: `${o.name} — ${String(o.status || 'неактивний').toLowerCase()}` }));
     } else {
       myEquipment = await supaGet(
         'user_equipment',
