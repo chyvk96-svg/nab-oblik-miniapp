@@ -229,7 +229,7 @@ async function renderEquipmentList(user) {
 
   let equipmentList;
   try {
-    equipmentList = await supaGet('equipment', `select=id,name,brand_model,reg_number,status,tracks_moto_hours,tracks_odometer,wialon_unit_id&order=status.asc,name.asc`);
+    equipmentList = await supaGet('equipment', `select=id,name,brand_model,reg_number,status,tracks_moto_hours,tracks_odometer,allows_two_operators,wialon_unit_id&order=status.asc,name.asc`);
   } catch (e) {
     listEl.textContent = 'Помилка завантаження: ' + e.message;
     return;
@@ -247,7 +247,7 @@ async function renderEquipmentList(user) {
         <span class="date">${eq.name}</span>
         <span class="status-chip ${eq.status === 'Активна' ? 'status-final' : 'status-corr'}">${eq.status}</span>
       </div>
-      <div class="meta">${eq.brand_model || '—'} · номер: ${eq.reg_number || '—'}${eq.tracks_moto_hours === false ? ' · без мотогодин' : ''}${eq.tracks_odometer ? ' · спідометр' : ''}</div>
+      <div class="meta">${eq.brand_model || '—'} · номер: ${eq.reg_number || '—'}${eq.tracks_moto_hours === false ? ' · без мотогодин' : ''}${eq.tracks_odometer ? ' · спідометр' : ''}${eq.allows_two_operators ? ' · 👥 2 оператори' : ''}</div>
       <div class="meta">Wialon: ${eq.wialon_unit_id ? eq.wialon_unit_id : 'не прив\'язано'}</div>
       <div class="item-actions">
         <button type="button" class="btn-confirm" data-edit-eq="${eq.id}">Редагувати</button>
@@ -430,7 +430,7 @@ async function renderEditEquipment(user, equipmentId) {
 
   let eq;
   try {
-    const rows = await supaGet('equipment', `id=eq.${equipmentId}&select=id,name,brand_model,reg_number,note,status,tracks_moto_hours,tracks_odometer,wialon_unit_id,confirmed_hours,confirmed_km`);
+    const rows = await supaGet('equipment', `id=eq.${equipmentId}&select=id,name,brand_model,reg_number,note,status,tracks_moto_hours,tracks_odometer,allows_two_operators,wialon_unit_id,confirmed_hours,confirmed_km`);
     eq = rows && rows[0];
   } catch (e) {
     bodyEl.textContent = 'Помилка завантаження: ' + e.message;
@@ -485,6 +485,12 @@ async function renderEditEquipment(user, equipmentId) {
           <div class="hint-inline">Від цього значення оператор почне наступний звіт (показник спідометра).</div>
         </div>
 
+        <div class="checkbox-row">
+          <input type="checkbox" id="edit_eq_allows_two_operators" ${eq.allows_two_operators ? 'checked' : ''}>
+          <label for="edit_eq_allows_two_operators">👥 Може працювати з двома операторами</label>
+        </div>
+        <div class="hint-inline">Лише для асфальтоукладача й фрези. Тоді у звіті на цій техніці зʼявиться галочка «Я другий оператор»: другий оператор подає свій звіт з годинами, а мотогодини й спідометр веде лише основний.</div>
+
         <label>Примітка</label>
         <textarea id="edit_eq_note">${eq.note || ''}</textarea>
       </div>
@@ -536,6 +542,8 @@ async function renderEditEquipment(user, equipmentId) {
       reg_number: regNumber || null,
       tracks_moto_hours: tracksMotoHours,
       tracks_odometer: tracksOdometer,
+      // (з 2026-10-14) "основний + другий оператор" — укладач, фреза
+      allows_two_operators: document.getElementById('edit_eq_allows_two_operators').checked,
       wialon_unit_id: wialon.value,
       note: note || null
     };
