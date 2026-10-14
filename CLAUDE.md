@@ -6,7 +6,7 @@
 потрапляє в GitHub, див. розділ 12).
 
 > Актуалізовано: **2026-10-14**. Останній коміт у GitHub на цю дату:
-> `6e9dda9` (14.10, "два оператори" завершено: позначка на картці звіту).
+> `b8349fd` (14.10, довідники: ЄДРПОУ замовника, "Код / номер", пошук).
 
 ---
 
@@ -159,7 +159,7 @@ index.html
   css/style.css            — жовто-асфальтова тема, шрифти Oswald / Inter / Space Mono
   js/config.js             — SUPABASE_URL, SUPABASE_KEY (publishable)
   js/supabase-client.js    — supaGet / supaInsert / supaUpdate / supaDelete / supaRpc
-  js/utils.js              — app, renderMessage, topbarHtml, formatDateUA/TimeUA/DateTimeUA, statusChipClass
+  js/utils.js              — app, renderMessage, topbarHtml, formatDateUA/TimeUA/DateTimeUA, statusChipClass, пошук у списках
   js/operator.js
   js/responsible.js
   js/admin.js
@@ -206,7 +206,13 @@ index.html
 - **`admin-manage.js`** — користувачі (`renderUserList`, `renderEditUser`,
   `renderUserEquipment`), техніка (`renderEquipmentList`,
   `renderAddEquipment`, `renderEditEquipment`, `parseWialonUnitId`),
-  замовники.
+  замовники (`renderCustomersList`, `renderAddCustomer`,
+  `renderEditCustomer`), спільні (з 14.10, використовує й `responsible.js`):
+  `codeValue` ("Код / номер": порожньо → NULL), `parseEdrpou`,
+  `edrpouDuplicateError`, `customerSaveErrorText`.
+- **Пошук у списках довідників** (`utils.js`, з 14.10): `listSearchHtml(key,
+  placeholder)` над списком + `wireListSearch(key, listEl)` після рендеру;
+  картка має `data-search="${searchAttr(...поля)}"`.
 - **`accountant.js`** — `renderAccountantHome`, `backToRoleMenu`,
   `renderMultiObjectReport`, `loadMultiObjectPeriod`,
   `buildMultiObjectWorkbook`.
@@ -456,6 +462,8 @@ Make (MCP) — давай користувачу покрокові інстру
 ## 15. Поточний стан і найближчі кроки
 
 Див. **`docs/TODO.md`** — там актуальний перелік. Коротко на 14.10:
+00. ⏳ Довідники: ЄДРПОУ, "Код / номер", пошук — залито 14.10, перевірка;
+   формат номерів об'єктів/техніки/користувачів повідомлять пізніше.
 0. ⏳ "Основний + другий оператор" (укладач, фреза) — усі 4 кроки залито
    14.10; перевірка в Telegram.
 1. ⏳ Перевірити фільтр об'єктів у формі редагування звіту адміном
