@@ -206,6 +206,7 @@ const EDIT_DIFF_FIELDS = [
   ['start_hours', 'Мотогодини, початок', 'num'],
   ['end_hours', 'Мотогодини, кінець', 'num'],
   ['start_hours_note', 'Причина розбіжності мотогодин', 'text'],
+  ['is_second_operator', 'Другий оператор', 'bool'],
   ['start_km', 'Спідометр, початок', 'num'],
   ['end_km', 'Спідометр, кінець', 'num'],
   ['start_time', 'Початок роботи', 'time'],
@@ -842,7 +843,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   try {
     if (adminCtx) {
       // Адмін може виправити й техніку: вся активна + техніка самого звіту
-      const eqFields = 'id,name,confirmed_hours,tracks_moto_hours,confirmed_km,tracks_odometer';
+      const eqFields = 'id,name,confirmed_hours,tracks_moto_hours,confirmed_km,tracks_odometer,allows_two_operators';
       const allEq = await supaGet('equipment', `select=${eqFields},status&order=name.asc`);
       myEquipment = (allEq || [])
         .filter(e => e.status === 'Активна' || (existingReport && e.id === existingReport.equipment_id))
@@ -858,7 +859,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     } else {
       myEquipment = await supaGet(
         'user_equipment',
-        `user_id=eq.${user.id}&status=eq.Активна&select=equipment_id,equipment(id,name,confirmed_hours,tracks_moto_hours,confirmed_km,tracks_odometer)`
+        `user_id=eq.${user.id}&status=eq.Активна&select=equipment_id,equipment(id,name,confirmed_hours,tracks_moto_hours,confirmed_km,tracks_odometer,allows_two_operators)`
       );
       objects = await supaGet('objects', `status=eq.Активний&select=id,name,customer_id,customers(name)`);
     }
@@ -876,12 +877,25 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   const tracksMotoHoursMap = {};
   const confirmedKmMap = {};
   const tracksOdometerMap = {};
+  const twoOperatorsMap = {};
   myEquipment.forEach(ue => {
     confirmedHoursMap[ue.equipment.id] = ue.equipment.confirmed_hours;
     tracksMotoHoursMap[ue.equipment.id] = ue.equipment.tracks_moto_hours !== false;
     confirmedKmMap[ue.equipment.id] = ue.equipment.confirmed_km;
     tracksOdometerMap[ue.equipment.id] = ue.equipment.tracks_odometer === true;
+    twoOperatorsMap[ue.equipment.id] = ue.equipment.allows_two_operators === true;
   });
+
+  // (з 2026-10-14) "Основний + другий оператор" (укладач, фреза): галочка
+  // "Я другий оператор" діє лише на техніці з allows_two_operators. Тоді, як і
+  // при "Робота на базі", мотогодини й спідометр не вказуються (їх веде
+  // основний оператор), години рахуються повністю. Обидві галочки можна
+  // поставити разом.
+  const isSecondOperator = () =>
+    twoOperatorsMap[document.getElementById('equipment_id').value] === true &&
+    document.getElementById('is_second_operator').checked;
+  // Мотогодини / спідометр не вказуються: робота на базі або другий оператор
+  const motoOff = () => document.getElementById('on_base_only').checked || isSecondOperator();
 
   // Якщо це редагування раніше відхиленого звіту — підтягуємо причину коригування,
   // щоб оператор одразу бачив, що саме треба виправити.
@@ -949,10 +963,18 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         <select id="responsible_id" required></select>
 
         <div class="checkbox-row">
-          <input type="checkbox" id="on_base_only"${prefill && !isDraftContinuation && prefill.start_hours == null && prefill.start_km == null ? ' checked' : ''}>
+          <input type="checkbox" id="on_base_only"${prefill && !isDraftContinuation && prefill.start_hours == null && prefill.start_km == null && !prefill.is_second_operator ? ' checked' : ''}>
           <label for="on_base_only">Робота на базі / ремонт (тільки людиногодини)</label>
         </div>
         <div class="hint-inline">Познач, якщо сьогодні технікою не працювали по факту (стояла на базі, в ремонті тощо) — мотогодини й спідометр не вказуються, рахуються лише відпрацьовані години. Деталі вкажи в примітці.</div>
+
+        <div id="second-operator-block" class="hidden">
+          <div class="checkbox-row">
+            <input type="checkbox" id="is_second_operator"${prefill && prefill.is_second_operator ? ' checked' : ''}>
+            <label for="is_second_operator">👥 Я другий оператор (мотогодини веде інший)</label>
+          </div>
+          <div class="hint-inline">Познач, якщо сьогодні на цій техніці працювали вдвох і мотогодини вносить інший оператор. Мотогодини й спідометр тоді не вказуєш, години рахуються повністю. Хто з вас основний — домовтесь самі.</div>
+        </div>
       </div>
 
       <div class="section">
@@ -1076,6 +1098,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         <input type="number" step="0.1" id="fueling_liters" value="${prefill ? (prefill.fueling_liters || 0) : '0'}">
         <label>Звідки заправились</label>
         <input type="text" id="fueling_source" placeholder="Наша заправна станція / з іншої техніки / каністри тощо" value="${prefill && prefill.fueling_source ? prefill.fueling_source : ''}">
+        <div class="hint-inline hidden" id="second-operator-fuel-hint">👥 Заправку вносить хтось один з вас — не дублюй, якщо її вже вказав інший оператор.</div>
 
         <div class="checkbox-row">
           <input type="checkbox" id="has_breakdown"${prefill && prefill.has_breakdown ? ' checked' : ''}>
@@ -1176,8 +1199,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   // необов'язковими, замість того щоб змушувати оператора вводити фіктивні дані.
   function applyMotoHoursAvailability() {
     const equipmentId = document.getElementById('equipment_id').value;
-    const onBaseOnly = document.getElementById('on_base_only').checked;
-    const tracksMotoHours = !onBaseOnly && tracksMotoHoursMap[equipmentId] !== false;
+    const tracksMotoHours = !motoOff() && tracksMotoHoursMap[equipmentId] !== false;
 
     const startInput = document.getElementById('start_hours');
     const endInput = document.getElementById('end_hours');
@@ -1204,8 +1226,22 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       startHint.textContent = '';
       endHint.textContent = '';
       box.classList.add('hidden');
+      disabledNote.textContent = isSecondOperator()
+        ? '👥 Ти другий оператор — мотогодини й спідометр вносить основний оператор.'
+        : (document.getElementById('on_base_only').checked
+          ? 'Робота на базі / ремонт — мотогодини не вказуються.'
+          : 'Ця техніка не рахує мотогодини — поле недоступне.');
       disabledNote.classList.remove('hidden');
     }
+  }
+
+  // Галочка "Я другий оператор" — лише для техніки з позначкою
+  // "Може працювати з двома операторами"; підказка біля заправки — коли
+  // галочку поставлено
+  function applySecondOperatorAvailability() {
+    const allowed = twoOperatorsMap[document.getElementById('equipment_id').value] === true;
+    document.getElementById('second-operator-block').classList.toggle('hidden', !allowed);
+    document.getElementById('second-operator-fuel-hint').classList.toggle('hidden', !isSecondOperator());
   }
 
   function checkDiscrepancy() {
@@ -1225,8 +1261,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   // просто підставляємо підтверджене значення як початок.
   function applyOdometerAvailability() {
     const equipmentId = document.getElementById('equipment_id').value;
-    const onBaseOnly = document.getElementById('on_base_only').checked;
-    const tracksOdometer = !onBaseOnly && tracksOdometerMap[equipmentId] === true;
+    const tracksOdometer = !motoOff() && tracksOdometerMap[equipmentId] === true;
 
     const section = document.getElementById('odometer-section');
     const startInput = document.getElementById('start_km');
@@ -1269,6 +1304,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   document.getElementById('end_km').addEventListener('input', checkEndKm);
 
   document.getElementById('equipment_id').addEventListener('change', () => {
+    applySecondOperatorAvailability();
     applyMotoHoursAvailability();
     applyOdometerAvailability();
   });
@@ -1276,20 +1312,26 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
     applyMotoHoursAvailability();
     applyOdometerAvailability();
   });
+  document.getElementById('is_second_operator').addEventListener('change', () => {
+    applySecondOperatorAvailability();
+    applyMotoHoursAvailability();
+    applyOdometerAvailability();
+  });
   document.getElementById('start_hours').addEventListener('input', () => { checkDiscrepancy(); checkEndHours(); });
 
+  applySecondOperatorAvailability();
   applyMotoHoursAvailability();
   applyOdometerAvailability();
 
   // Якщо є чернетка (редагування або повернення з перегляду) — підставляємо
   // реальне значення, яке оператор вводив раніше (могло відрізнятись від
   // підтвердженого техніки). Лише для техніки, яка рахує мотогодини, і якщо
-  // це не був звіт "тільки людиногодини".
-  if (prefill && !document.getElementById('on_base_only').checked && tracksMotoHoursMap[document.getElementById('equipment_id').value] !== false) {
+  // це не був звіт "тільки людиногодини" чи звіт другого оператора.
+  if (prefill && !motoOff() && tracksMotoHoursMap[document.getElementById('equipment_id').value] !== false) {
     document.getElementById('start_hours').value = prefill.start_hours;
     checkDiscrepancy();
   }
-  if (prefill && !document.getElementById('on_base_only').checked && tracksOdometerMap[document.getElementById('equipment_id').value] === true) {
+  if (prefill && !motoOff() && tracksOdometerMap[document.getElementById('equipment_id').value] === true) {
     document.getElementById('start_km').value = prefill.start_km;
     checkEndKm();
   }
@@ -1407,9 +1449,8 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       return isNaN(v) ? null : v;
     };
 
-    const onBaseOnly = document.getElementById('on_base_only').checked;
-    const tracksMotoHours = !onBaseOnly && tracksMotoHoursMap[equipmentId] !== false;
-    const tracksOdometer = !onBaseOnly && tracksOdometerMap[equipmentId] === true;
+    const tracksMotoHours = !motoOff() && tracksMotoHoursMap[equipmentId] !== false;
+    const tracksOdometer = !motoOff() && tracksOdometerMap[equipmentId] === true;
     const hasBreakdown = document.getElementById('has_breakdown').checked;
     const transportedPeople = document.getElementById('transported_people').checked;
     const hasCommute = document.getElementById('has_commute').checked;
@@ -1427,6 +1468,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       start_hours: tracksMotoHours ? num('start_hours') : null,
       end_hours: tracksMotoHours ? num('end_hours') : null,
       start_hours_note: document.getElementById('start_hours_note')?.value.trim() || null,
+      is_second_operator: isSecondOperator(),
       start_km: tracksOdometer ? num('start_km') : null,
       end_km: tracksOdometer ? num('end_km') : null,
       start_time: draftTimeValue(document.getElementById('start_time').value),
@@ -1531,8 +1573,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       }
 
       const equipmentId = document.getElementById('equipment_id').value;
-      const onBaseOnly = document.getElementById('on_base_only').checked;
-      const tracksMotoHours = !onBaseOnly && tracksMotoHoursMap[equipmentId] !== false;
+      const tracksMotoHours = !motoOff() && tracksMotoHoursMap[equipmentId] !== false;
 
       let startHoursVal = null;
       let endHoursVal = null;
@@ -1553,7 +1594,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         startHoursNote = discrepancyVisible ? noteVal : null;
       }
 
-      const tracksOdometer = !onBaseOnly && tracksOdometerMap[equipmentId] === true;
+      const tracksOdometer = !motoOff() && tracksOdometerMap[equipmentId] === true;
       let startKmVal = null;
       let endKmVal = null;
 
@@ -1642,6 +1683,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         start_hours: startHoursVal,
         end_hours: endHoursVal,
         start_hours_note: startHoursNote,
+        is_second_operator: isSecondOperator(),
         start_km: startKmVal,
         end_km: endKmVal,
         start_time: startTime,
@@ -1669,6 +1711,29 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       const objectName = objects.find(o => o.id === payload.object_id)?.name || '—';
 
       if (adminCtx) payload.start_hours_note = startHoursNote ?? existingReport.start_hours_note ?? null;
+
+      // (з 2026-10-14) Техніка на двох операторів: якщо я вношу мотогодини,
+      // а інший оператор за цю дату на цій техніці вже подав звіт з
+      // мотогодинами — можливо, забули галочку "Я другий оператор".
+      // Лише попередження: інколи це справді дві різні зміни.
+      if (!adminCtx && twoOperatorsMap[equipmentId] && payload.start_hours !== null) {
+        const others = await findOtherOperatorsMotoReports(user.id, payload, isEdit ? existingReport.id : currentDraftId);
+        if (others.length) {
+          const names = Array.from(new Set(others.map(r => r.users?.full_name || r.operator_id))).join(', ');
+          const goOn = confirm(
+            `На цій техніці за ${formatDateUA(payload.work_date)} вже є звіт ${names} з мотогодинами.\n\n` +
+            `Якщо працювали разом — натисни «Скасувати» і постав галочку «👥 Я другий оператор».\n\n` +
+            `Якщо це справді окрема зміна — натисни «OK».`
+          );
+          if (!goOn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Перевірити звіт';
+            document.getElementById('is_second_operator').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+          }
+        }
+      }
+
       // Дочекатись автозбереження, яке могло ще виконуватись у момент
       // натискання, — тоді currentDraftId вже містить ID створеної чернетки.
       clearTimeout(autosaveTimer);
@@ -1730,6 +1795,23 @@ function sameReportFilter(operatorId, p) {
 async function findSimilarSubmittedReports(operatorId, p, ownId) {
   try {
     let q = `${sameReportFilter(operatorId, p)}&status=neq.Чернетка&select=id,status&order=id.asc`;
+    if (ownId) q += `&id=neq.${encodeURIComponent(ownId)}`;
+    return (await supaGet('daily_reports', q)) || [];
+  } catch (e) {
+    return []; // перевірка допоміжна — не блокує подачу
+  }
+}
+
+// (з 2026-10-14) Подані (не чернетки) звіти ІНШИХ операторів за ту саму дату
+// на тій самій техніці, де вказано мотогодини і це не "другий оператор".
+// Для попередження на техніці з двома операторами (укладач, фреза).
+async function findOtherOperatorsMotoReports(operatorId, p, ownId) {
+  try {
+    let q = `equipment_id=eq.${encodeURIComponent(p.equipment_id)}` +
+      `&work_date=eq.${encodeURIComponent(p.work_date)}` +
+      `&operator_id=neq.${encodeURIComponent(operatorId)}` +
+      `&status=neq.Чернетка&start_hours=not.is.null&is_second_operator=is.false` +
+      `&select=id,operator_id,users!daily_reports_operator_id_fkey(full_name)&order=id.asc`;
     if (ownId) q += `&id=neq.${encodeURIComponent(ownId)}`;
     return (await supaGet('daily_reports', q)) || [];
   } catch (e) {
