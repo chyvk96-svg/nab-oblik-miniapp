@@ -155,6 +155,9 @@ async function renderAddObject(user) {
         <label>Скорочена назва</label>
         <input type="text" id="object_short_name" placeholder="Необов'язково">
 
+        <label>Код / номер об'єкта</label>
+        <input type="text" id="object_code" placeholder="Необов'язково">
+
         <label>Дата початку</label>
         <input type="date" id="object_start_date">
 
@@ -164,6 +167,7 @@ async function renderAddObject(user) {
           <option value="__new__">+ Новий замовник...</option>
         </select>
         <input type="text" id="object_new_customer_name" class="hidden" placeholder="Назва нового замовника" style="margin-top:8px">
+        <input type="text" id="object_new_customer_edrpou" class="hidden" inputmode="numeric" maxlength="12" placeholder="ЄДРПОУ нового замовника (необов'язково)" style="margin-top:8px">
 
         <label>Відповідальний за об'єкт</label>
         <select id="object_responsible_id" required>
@@ -182,8 +186,11 @@ async function renderAddObject(user) {
   const customerSelect = document.getElementById('object_customer_id');
   const newCustomerInput = document.getElementById('object_new_customer_name');
 
+  const newCustomerEdrpouInput = document.getElementById('object_new_customer_edrpou');
+
   customerSelect.addEventListener('change', () => {
     newCustomerInput.classList.toggle('hidden', customerSelect.value !== '__new__');
+    newCustomerEdrpouInput.classList.toggle('hidden', customerSelect.value !== '__new__');
   });
 
   // За замовчуванням дата початку — сьогодні
@@ -210,6 +217,12 @@ async function renderAddObject(user) {
       errorBox.classList.remove('hidden');
       return;
     }
+    const newCustomerEdrpou = parseEdrpou(customerChoice === '__new__' ? newCustomerEdrpouInput.value : '');
+    if (newCustomerEdrpou.error) {
+      errorBox.textContent = newCustomerEdrpou.error;
+      errorBox.classList.remove('hidden');
+      return;
+    }
 
     submitBtn.disabled = true;
     submitBtn.textContent = 'Створення...';
@@ -217,10 +230,13 @@ async function renderAddObject(user) {
     try {
       let customerId = customerChoice;
       if (customerChoice === '__new__') {
+        const dupError = await edrpouDuplicateError(newCustomerEdrpou.value, null);
+        if (dupError) throw new Error(dupError + ' Обери його зі списку.');
         customerId = await supaRpc('next_id', { p_prefix: 'CST' });
         await supaInsert('customers', {
           id: customerId,
           name: newCustomerName,
+          edrpou: newCustomerEdrpou.value,
           status: 'Активний'
         });
       }
@@ -230,6 +246,7 @@ async function renderAddObject(user) {
         id: objectId,
         name: name,
         short_name: shortName || null,
+        code: codeValue(document.getElementById('object_code').value),
         start_date: startDate || null,
         customer_id: customerId,
         status: 'Активний'
@@ -254,7 +271,7 @@ async function renderAddObject(user) {
       `;
       document.getElementById('back-home-btn').addEventListener('click', () => goToRoleHome(user));
     } catch (err) {
-      errorBox.textContent = err.message;
+      errorBox.textContent = customerSaveErrorText(err);
       errorBox.classList.remove('hidden');
       submitBtn.disabled = false;
       submitBtn.textContent = "Створити об'єкт";
@@ -302,6 +319,7 @@ async function renderManageObjects(user) {
     ${topbarHtml("Об'єкти", roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-menu-objects" style="margin:0 0 14px">← Назад до меню</div>
+      ${listSearchHtml('objects', 'Пошук: назва, код, замовник')}
       <div id="objects-list" class="msg">Завантаження...</div>
     </div>
   `;
@@ -313,7 +331,7 @@ async function renderManageObjects(user) {
   try {
     objectsList = await supaGet(
       'objects',
-      `select=id,name,short_name,status,customers(name)&order=name.asc`
+      `select=id,name,short_name,code,status,customers(name,edrpou)&order=name.asc`
     );
   } catch (e) {
     listEl.textContent = 'Помилка завантаження: ' + e.message;
@@ -335,12 +353,12 @@ async function renderManageObjects(user) {
 
   listEl.className = '';
   listEl.innerHTML = objectsList.map(o => `
-    <div class="report-card" id="obj-${o.id}">
+    <div class="report-card" id="obj-${o.id}" data-search="${searchAttr(o.name, o.short_name, o.code, o.customers?.name, o.customers?.edrpou, o.status)}">
       <div class="top-row">
         <span class="date">${o.name}</span>
         <span class="status-chip ${objectStatusChipClass(o.status)}">${o.status}</span>
       </div>
-      <div class="meta">Замовник: ${o.customers?.name || '—'}</div>
+      <div class="meta">Замовник: ${o.customers?.name || '—'}${o.code ? ` · код: ${escHtml(o.code)}` : ''}</div>
       <div class="item-actions">
         <button class="btn-confirm" data-edit-object="${o.id}" style="min-width:0; padding:10px 4px">Редагувати</button>
         ${objectStatusActions(o.status).map(([newStatus, label]) => `
@@ -349,6 +367,7 @@ async function renderManageObjects(user) {
       </div>
     </div>
   `).join('');
+  wireListSearch('objects', listEl);
 
   listEl.querySelectorAll('[data-edit-object]').forEach(btn => {
     btn.addEventListener('click', () => renderEditObject(user, btn.dataset.editObject));
@@ -401,7 +420,7 @@ async function renderEditObject(user, objectId) {
 
   let objectRow, customersList, respCandidates, currentResponsible;
   try {
-    const rows = await supaGet('objects', `id=eq.${objectId}&select=id,name,short_name,customer_id,start_date,end_date`);
+    const rows = await supaGet('objects', `id=eq.${objectId}&select=id,name,short_name,code,customer_id,start_date,end_date`);
     objectRow = rows && rows[0];
     customersList = await supaGet('customers', `status=eq.Активний&select=id,name&order=name.asc`);
     respCandidates = await supaGet(
@@ -444,6 +463,9 @@ async function renderEditObject(user, objectId) {
 
         <label>Скорочена назва</label>
         <input type="text" id="edit_object_short_name" value="${objectRow.short_name || ''}">
+
+        <label>Код / номер об'єкта</label>
+        <input type="text" id="edit_object_code" value="${escHtml(objectRow.code || '')}" placeholder="Необов'язково">
 
         <label>Замовник</label>
         <select id="edit_object_customer_id" required>
@@ -536,6 +558,7 @@ async function renderEditObject(user, objectId) {
       await supaUpdate('objects', `id=eq.${objectId}`, {
         name: name,
         short_name: shortName || null,
+        code: codeValue(document.getElementById('edit_object_code').value),
         customer_id: customerId,
         start_date: startDate || null,
         end_date: endDate || null

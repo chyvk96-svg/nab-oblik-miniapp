@@ -15,6 +15,7 @@ async function renderUserList(user) {
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-menu-users" style="margin:0 0 14px">← Назад до меню</div>
       <button type="button" class="btn-add-top" id="btn-go-add-user">+ Додати користувача</button>
+      ${listSearchHtml('users', 'Пошук: ПІБ, код, телефон, роль')}
       <div id="users-list" class="msg">Завантаження...</div>
     </div>
   `;
@@ -25,7 +26,7 @@ async function renderUserList(user) {
 
   let usersList;
   try {
-    usersList = await supaGet('users', `select=id,full_name,role,phone,telegram_id,status&order=status.asc,full_name.asc`);
+    usersList = await supaGet('users', `select=id,full_name,role,phone,telegram_id,status,code&order=status.asc,full_name.asc`);
   } catch (e) {
     listEl.textContent = 'Помилка завантаження: ' + e.message;
     return;
@@ -38,12 +39,12 @@ async function renderUserList(user) {
 
   listEl.className = '';
   listEl.innerHTML = usersList.map(u => `
-    <div class="report-card">
+    <div class="report-card" data-search="${searchAttr(u.full_name, u.code, u.phone, u.role, u.telegram_id, u.status)}">
       <div class="top-row">
         <span class="date">${u.full_name}</span>
         <span class="status-chip ${u.status === 'Активний' ? 'status-final' : 'status-corr'}">${u.status}</span>
       </div>
-      <div class="meta">${u.role} · тел: ${u.phone || '—'} · TG ID: ${u.telegram_id}</div>
+      <div class="meta">${u.role} · тел: ${u.phone || '—'} · TG ID: ${u.telegram_id}${u.code ? ` · код: ${escHtml(u.code)}` : ''}</div>
       <div class="item-actions">
         <button type="button" class="btn-confirm" data-edit-user="${u.id}">Редагувати</button>
         <button type="button" class="btn-reject" data-toggle-user="${u.id}" data-current-status="${u.status}">
@@ -52,6 +53,7 @@ async function renderUserList(user) {
       </div>
     </div>
   `).join('');
+  wireListSearch('users', listEl);
 
   listEl.querySelectorAll('[data-edit-user]').forEach(btn => {
     btn.addEventListener('click', () => renderEditUser(user, btn.dataset.editUser));
@@ -89,7 +91,7 @@ async function renderEditUser(user, targetUserId) {
 
   let targetUser, rolesList;
   try {
-    const rows = await supaGet('users', `id=eq.${targetUserId}&select=id,full_name,role,phone,telegram_id,status,note`);
+    const rows = await supaGet('users', `id=eq.${targetUserId}&select=id,full_name,role,phone,telegram_id,status,note,code`);
     targetUser = rows && rows[0];
     rolesList = await supaGet('roles', `status=eq.Активна&select=name&order=name.asc`);
   } catch (e) {
@@ -113,6 +115,9 @@ async function renderEditUser(user, targetUserId) {
 
         <label>ПІБ</label>
         <input type="text" id="edit_user_name" required value="${targetUser.full_name}">
+
+        <label>Код / номер</label>
+        <input type="text" id="edit_user_code" value="${escHtml(targetUser.code || '')}" placeholder="Необов'язково">
 
         <label>Telegram ID</label>
         <input type="number" id="edit_user_telegram_id" required value="${targetUser.telegram_id}">
@@ -175,6 +180,7 @@ async function renderEditUser(user, targetUserId) {
         telegram_id: parseInt(telegramId, 10),
         phone: phone || null,
         role: role,
+        code: codeValue(document.getElementById('edit_user_code').value),
         note: note || null
       });
       renderUserList(user);
@@ -203,6 +209,45 @@ function parseWialonUnitId(raw) {
   return { value: v, error: null };
 }
 
+// "Код / номер" (з 2026-10-14) — об'єкти, техніка, користувачі. Поки
+// необов'язковий і без перевірок: формат номерів ще уточнюється.
+function codeValue(raw) {
+  const v = (raw || '').trim();
+  return v === '' ? null : v;
+}
+
+// ЄДРПОУ замовника (з 2026-10-14): 8 цифр (підприємство) або 10 (ІПН ФОП).
+// Необов'язковий. Пробіли в середині прибираємо. Повертає { value, error }.
+function parseEdrpou(raw) {
+  const v = (raw || '').replace(/\s+/g, '');
+  if (v === '') return { value: null, error: null };
+  if (!/^(\d{8}|\d{10})$/.test(v)) {
+    return { value: null, error: 'ЄДРПОУ — 8 цифр (підприємство) або 10 цифр (ІПН, якщо замовник — ФОП).' };
+  }
+  return { value: v, error: null };
+}
+
+// Чи є вже замовник з таким ЄДРПОУ (крім exceptId). Повертає текст
+// помилки або null. У базі теж стоїть унікальний індекс idx_customers_edrpou.
+async function edrpouDuplicateError(edrpou, exceptId) {
+  if (!edrpou) return null;
+  let q = `edrpou=eq.${edrpou}&select=id,name&limit=1`;
+  if (exceptId) q += `&id=neq.${exceptId}`;
+  const rows = await supaGet('customers', q);
+  return rows && rows.length ? `Цей ЄДРПОУ вже є у замовника «${rows[0].name}».` : null;
+}
+
+function customerSaveErrorText(err) {
+  const msg = (err && err.message) || '';
+  if (msg.includes('idx_customers_edrpou') || msg.includes('duplicate key')) {
+    return 'Цей ЄДРПОУ вже є в іншого замовника. Перевір код.';
+  }
+  if (msg.includes('customers_edrpou_format_chk')) {
+    return 'ЄДРПОУ — 8 цифр (підприємство) або 10 цифр (ІПН, якщо замовник — ФОП).';
+  }
+  return msg;
+}
+
 // Зрозуміле повідомлення, якщо цей ID Wialon уже прив'язаний до іншої техніки
 // (у БД стоїть унікальний індекс idx_equipment_wialon_unit_id).
 function equipmentSaveErrorText(err) {
@@ -219,6 +264,7 @@ async function renderEquipmentList(user) {
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-menu-eq" style="margin:0 0 14px">← Назад до меню</div>
       <button type="button" class="btn-add-top" id="btn-go-add-equipment">+ Додати техніку</button>
+      ${listSearchHtml('equipment', 'Пошук: назва, марка, номер, код')}
       <div id="equipment-list" class="msg">Завантаження...</div>
     </div>
   `;
@@ -229,7 +275,7 @@ async function renderEquipmentList(user) {
 
   let equipmentList;
   try {
-    equipmentList = await supaGet('equipment', `select=id,name,brand_model,reg_number,status,tracks_moto_hours,tracks_odometer,allows_two_operators,wialon_unit_id&order=status.asc,name.asc`);
+    equipmentList = await supaGet('equipment', `select=id,name,brand_model,reg_number,code,status,tracks_moto_hours,tracks_odometer,allows_two_operators,wialon_unit_id&order=status.asc,name.asc`);
   } catch (e) {
     listEl.textContent = 'Помилка завантаження: ' + e.message;
     return;
@@ -242,12 +288,12 @@ async function renderEquipmentList(user) {
 
   listEl.className = '';
   listEl.innerHTML = equipmentList.map(eq => `
-    <div class="report-card">
+    <div class="report-card" data-search="${searchAttr(eq.name, eq.brand_model, eq.reg_number, eq.code, eq.wialon_unit_id, eq.status)}">
       <div class="top-row">
         <span class="date">${eq.name}</span>
         <span class="status-chip ${eq.status === 'Активна' ? 'status-final' : 'status-corr'}">${eq.status}</span>
       </div>
-      <div class="meta">${eq.brand_model || '—'} · номер: ${eq.reg_number || '—'}${eq.tracks_moto_hours === false ? ' · без мотогодин' : ''}${eq.tracks_odometer ? ' · спідометр' : ''}${eq.allows_two_operators ? ' · 👥 2 оператори' : ''}</div>
+      <div class="meta">${eq.brand_model || '—'} · номер: ${eq.reg_number || '—'}${eq.code ? ` · код: ${escHtml(eq.code)}` : ''}${eq.tracks_moto_hours === false ? ' · без мотогодин' : ''}${eq.tracks_odometer ? ' · спідометр' : ''}${eq.allows_two_operators ? ' · 👥 2 оператори' : ''}</div>
       <div class="meta">Wialon: ${eq.wialon_unit_id ? eq.wialon_unit_id : 'не прив\'язано'}</div>
       <div class="item-actions">
         <button type="button" class="btn-confirm" data-edit-eq="${eq.id}">Редагувати</button>
@@ -257,6 +303,7 @@ async function renderEquipmentList(user) {
       </div>
     </div>
   `).join('');
+  wireListSearch('equipment', listEl);
 
   listEl.querySelectorAll('[data-edit-eq]').forEach(btn => {
     btn.addEventListener('click', () => renderEditEquipment(user, btn.dataset.editEq));
@@ -297,6 +344,9 @@ async function renderAddEquipment(user) {
 
           <label>Держ./інвентарний номер</label>
           <input type="text" id="new_eq_reg_number" placeholder="Необов'язково">
+
+          <label>Код / номер</label>
+          <input type="text" id="new_eq_code" placeholder="Необов'язково">
 
           <label>ID у Wialon</label>
           <input type="text" id="new_eq_wialon_unit_id" inputmode="numeric" placeholder="Необов'язково, напр. 23952736">
@@ -388,6 +438,7 @@ async function renderAddEquipment(user) {
         name: name,
         brand_model: brandModel || null,
         reg_number: regNumber || null,
+        code: codeValue(document.getElementById('new_eq_code').value),
         status: 'Активна',
         tracks_moto_hours: tracksMotoHours,
         confirmed_hours: confirmedHours,
@@ -430,7 +481,7 @@ async function renderEditEquipment(user, equipmentId) {
 
   let eq;
   try {
-    const rows = await supaGet('equipment', `id=eq.${equipmentId}&select=id,name,brand_model,reg_number,note,status,tracks_moto_hours,tracks_odometer,allows_two_operators,wialon_unit_id,confirmed_hours,confirmed_km`);
+    const rows = await supaGet('equipment', `id=eq.${equipmentId}&select=id,name,brand_model,reg_number,code,note,status,tracks_moto_hours,tracks_odometer,allows_two_operators,wialon_unit_id,confirmed_hours,confirmed_km`);
     eq = rows && rows[0];
   } catch (e) {
     bodyEl.textContent = 'Помилка завантаження: ' + e.message;
@@ -456,6 +507,9 @@ async function renderEditEquipment(user, equipmentId) {
 
         <label>Держ./інвентарний номер</label>
         <input type="text" id="edit_eq_reg_number" value="${eq.reg_number || ''}">
+
+        <label>Код / номер</label>
+        <input type="text" id="edit_eq_code" value="${escHtml(eq.code || '')}" placeholder="Необов'язково">
 
         <label>ID у Wialon</label>
         <input type="text" id="edit_eq_wialon_unit_id" inputmode="numeric" value="${eq.wialon_unit_id || ''}" placeholder="Необов'язково, напр. 23952736">
@@ -540,6 +594,7 @@ async function renderEditEquipment(user, equipmentId) {
       name: name,
       brand_model: brandModel || null,
       reg_number: regNumber || null,
+      code: codeValue(document.getElementById('edit_eq_code').value),
       tracks_moto_hours: tracksMotoHours,
       tracks_odometer: tracksOdometer,
       // (з 2026-10-14) "основний + другий оператор" — укладач, фреза
@@ -693,6 +748,7 @@ async function renderCustomersList(user) {
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-menu-cst" style="margin:0 0 14px">← Назад до меню</div>
       <button type="button" class="btn-add-top" id="btn-go-add-customer">+ Додати замовника</button>
+      ${listSearchHtml('customers', 'Пошук: назва або ЄДРПОУ')}
       <div id="customers-list" class="msg">Завантаження...</div>
     </div>
   `;
@@ -703,7 +759,7 @@ async function renderCustomersList(user) {
 
   let customersList;
   try {
-    customersList = await supaGet('customers', `select=id,name,note,status&order=status.asc,name.asc`);
+    customersList = await supaGet('customers', `select=id,name,edrpou,note,status&order=status.asc,name.asc`);
   } catch (e) {
     listEl.textContent = 'Помилка завантаження: ' + e.message;
     return;
@@ -716,11 +772,12 @@ async function renderCustomersList(user) {
 
   listEl.className = '';
   listEl.innerHTML = customersList.map(c => `
-    <div class="report-card">
+    <div class="report-card" data-search="${searchAttr(c.name, c.edrpou, c.note, c.status)}">
       <div class="top-row">
         <span class="date">${c.name}</span>
         <span class="status-chip ${c.status === 'Активний' ? 'status-final' : 'status-corr'}">${c.status}</span>
       </div>
+      <div class="meta">ЄДРПОУ: ${c.edrpou ? escHtml(c.edrpou) : 'не вказано'}</div>
       ${c.note ? `<div class="meta">${c.note}</div>` : ''}
       <div class="item-actions">
         <button type="button" class="btn-confirm" data-edit-cst="${c.id}">Редагувати</button>
@@ -730,6 +787,7 @@ async function renderCustomersList(user) {
       </div>
     </div>
   `).join('');
+  wireListSearch('customers', listEl);
 
   listEl.querySelectorAll('[data-edit-cst]').forEach(btn => {
     btn.addEventListener('click', () => renderEditCustomer(user, btn.dataset.editCst));
@@ -765,6 +823,9 @@ async function renderAddCustomer(user) {
           <label>Назва</label>
           <input type="text" id="new_cst_name" required placeholder="Наприклад: ТзОВ ХХІ століття плюс">
 
+          <label>ЄДРПОУ</label>
+          <input type="text" id="new_cst_edrpou" inputmode="numeric" maxlength="12" placeholder="Необов'язково: 8 цифр, для ФОП — 10">
+
           <label>Примітка</label>
           <textarea id="new_cst_note" placeholder="Необов'язково"></textarea>
         </div>
@@ -786,9 +847,15 @@ async function renderAddCustomer(user) {
 
     const name = document.getElementById('new_cst_name').value.trim();
     const note = document.getElementById('new_cst_note').value.trim();
+    const edrpou = parseEdrpou(document.getElementById('new_cst_edrpou').value);
 
     if (!name) {
       errorBox.textContent = "Вкажи назву замовника.";
+      errorBox.classList.remove('hidden');
+      return;
+    }
+    if (edrpou.error) {
+      errorBox.textContent = edrpou.error;
       errorBox.classList.remove('hidden');
       return;
     }
@@ -797,10 +864,13 @@ async function renderAddCustomer(user) {
     submitBtn.textContent = 'Створення...';
 
     try {
+      const dupError = await edrpouDuplicateError(edrpou.value, null);
+      if (dupError) throw new Error(dupError);
       const cstId = await supaRpc('next_id', { p_prefix: 'CST' });
       await supaInsert('customers', {
         id: cstId,
         name: name,
+        edrpou: edrpou.value,
         status: 'Активний',
         note: note || null
       });
@@ -816,7 +886,7 @@ async function renderAddCustomer(user) {
       `;
       document.getElementById('back-cst-list-btn').addEventListener('click', () => renderCustomersList(user));
     } catch (err) {
-      errorBox.textContent = err.message;
+      errorBox.textContent = customerSaveErrorText(err);
       errorBox.classList.remove('hidden');
       submitBtn.disabled = false;
       submitBtn.textContent = "Додати замовника";
@@ -838,7 +908,7 @@ async function renderEditCustomer(user, customerId) {
 
   let cst;
   try {
-    const rows = await supaGet('customers', `id=eq.${customerId}&select=id,name,note,status`);
+    const rows = await supaGet('customers', `id=eq.${customerId}&select=id,name,edrpou,note,status`);
     cst = rows && rows[0];
   } catch (e) {
     bodyEl.textContent = 'Помилка завантаження: ' + e.message;
@@ -859,6 +929,9 @@ async function renderEditCustomer(user, customerId) {
         <label>Назва</label>
         <input type="text" id="edit_cst_name" required value="${cst.name}">
 
+        <label>ЄДРПОУ</label>
+        <input type="text" id="edit_cst_edrpou" inputmode="numeric" maxlength="12" value="${escHtml(cst.edrpou || '')}" placeholder="Необов'язково: 8 цифр, для ФОП — 10">
+
         <label>Примітка</label>
         <textarea id="edit_cst_note">${cst.note || ''}</textarea>
       </div>
@@ -878,9 +951,15 @@ async function renderEditCustomer(user, customerId) {
 
     const name = document.getElementById('edit_cst_name').value.trim();
     const note = document.getElementById('edit_cst_note').value.trim();
+    const edrpou = parseEdrpou(document.getElementById('edit_cst_edrpou').value);
 
     if (!name) {
       errorBox.textContent = "Вкажи назву замовника.";
+      errorBox.classList.remove('hidden');
+      return;
+    }
+    if (edrpou.error) {
+      errorBox.textContent = edrpou.error;
       errorBox.classList.remove('hidden');
       return;
     }
@@ -889,13 +968,16 @@ async function renderEditCustomer(user, customerId) {
     submitBtn.textContent = 'Збереження...';
 
     try {
+      const dupError = await edrpouDuplicateError(edrpou.value, customerId);
+      if (dupError) throw new Error(dupError);
       await supaUpdate('customers', `id=eq.${customerId}`, {
         name: name,
+        edrpou: edrpou.value,
         note: note || null
       });
       renderCustomersList(user);
     } catch (err) {
-      errorBox.textContent = err.message;
+      errorBox.textContent = customerSaveErrorText(err);
       errorBox.classList.remove('hidden');
       submitBtn.disabled = false;
       submitBtn.textContent = "Зберегти зміни";

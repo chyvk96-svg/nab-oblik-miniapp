@@ -362,6 +362,9 @@ async function renderAddUser(user) {
         <label>ПІБ</label>
         <input type="text" id="new_user_name" required placeholder="Прізвище Ім'я">
 
+        <label>Код / номер</label>
+        <input type="text" id="new_user_code" placeholder="Необов'язково">
+
         <label>Telegram ID</label>
         <input type="number" id="new_user_telegram_id" required placeholder="Наприклад: 123456789">
         <div class="hint-inline">Працівник дізнається свій Telegram ID через бота @userinfobot і повідомляє тобі</div>
@@ -443,6 +446,7 @@ async function renderAddUser(user) {
         role: role,
         phone: phone || null,
         status: 'Активний',
+        code: codeValue(document.getElementById('new_user_code').value),
         note: note || null
       });
 
