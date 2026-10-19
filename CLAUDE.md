@@ -5,8 +5,8 @@
 бізнес-логіка, схема бази й історія — у папці `docs/` (вона **не**
 потрапляє в GitHub, див. розділ 12).
 
-> Актуалізовано: **2026-10-14**. Останній коміт у GitHub на цю дату:
-> `b8349fd` (14.10, довідники: ЄДРПОУ замовника, "Код / номер", пошук).
+> Актуалізовано: **2026-10-19**. Останній коміт коду на цю дату:
+> `2330828` (19.10, Mini App працює з пропуском tg-auth).
 
 ---
 
@@ -158,15 +158,34 @@ index.html
   telegram-web-app.js (CDN Telegram)
   css/style.css            — жовто-асфальтова тема, шрифти Oswald / Inter / Space Mono
   js/config.js             — SUPABASE_URL, SUPABASE_KEY (publishable)
-  js/supabase-client.js    — supaGet / supaInsert / supaUpdate / supaDelete / supaRpc
+  js/supabase-client.js    — supaGet / supaInsert / supaUpdate / supaDelete / supaRpc / supaStorageUpload + пропуск (сесія tg-auth)
   js/utils.js              — app, renderMessage, topbarHtml, formatDateUA/TimeUA/DateTimeUA, statusChipClass, пошук у списках
   js/operator.js
   js/responsible.js
   js/admin.js
   js/admin-manage.js
   js/accountant.js
-  js/router.js             — точка входу: tg.ready(), users за telegram_id, маршрут за роллю
+  js/router.js             — точка входу: tg.ready(), вхід через tg-auth (запасний шлях — users за telegram_id), маршрут за роллю
+supabase/functions/tg-auth/ — Edge Function входу (index.ts, verify.ts); НЕ частина Mini App
 ```
+
+### Вхід із пропуском (з 2026-10-19)
+
+- **`tg-auth`** (Edge Function, `--no-verify-jwt`): підпис Telegram
+  `initData` + вік ≤ 24 год → активний `users` за `telegram_id` → запис
+  Supabase Auth `tg<telegram_id>@nab-oblik.local` (`app_metadata.nab_user_id`
+  = `users.id`) → сесія. Відповіді: 401 підпис, 403 `not_found`/`inactive`.
+  Роль у пропуск не вшита — береться з `users` наживо. Розгортання — з копії в
+  scratchpad (щоб CLI не створював `supabase/.temp` у репо):
+  `functions deploy tg-auth --project-ref ypnfujxcwgfjmewrsqus --no-verify-jwt --use-api`.
+- **`supabase-client.js`**: `authSignIn`, `supaFetch` (усі `supa*` і
+  `supaStorageUpload` ідуть з пропуском), оновлення за 5 хв до кінця
+  (`authRenew` — одне на всі запити; refresh → не вийшло → повторний вхід),
+  401 → оновлення + 1 повтор. **Запасний шлях** (поки RLS вимкнено): немає
+  пропуску → publishable key + `errors` `action_id = 'TG_AUTH'`. Після RLS
+  запасний шлях перестане працювати — замінити на "перезапусти Mini App".
+- Прямих `fetch` до Supabase в інших файлах **не писати** — лише через
+  `supa*` / `supaStorageUpload`, інакше запит піде без пропуску.
 
 ### Ключові функції за файлами
 
@@ -470,11 +489,13 @@ Make (MCP) — давай користувачу покрокові інстру
 
 ## 15. Поточний стан і найближчі кроки
 
-Див. **`docs/TODO.md`** — там актуальний перелік. Коротко на 14.10:
+Див. **`docs/TODO.md`** — там актуальний перелік. Коротко на 19.10:
 1. 🔐 **В РОБОТІ: захист даних (RLS + initData)** — по одному кроку з
-   перевіркою (вимога користувача). Підготовку зроблено, Make переводиться
-   на секретний ключ (з'єднання "Supabase НАБ (make)"). План і стан —
-   `docs/TODO.md`, розділ "🔐 ЗАХИСТ ДАНИХ".
+   перевіркою (вимога користувача). Зроблено: Make на секретному ключі
+   (перевірено 15–19.10), Edge Function `tg-auth`, Mini App працює з
+   пропуском (19.10, `2330828`; Excel перевірено). **20.10 — перевірка на
+   реальних звітах**, далі — RLS на всіх таблицях + `revoke anon`. План і
+   стан — `docs/TODO.md`, розділ "🔐 ЗАХИСТ ДАНИХ".
 2. ✅ Перевірено 14.10: "основний + другий оператор"; ЄДРПОУ / "Код /
    номер" / пошук у довідниках.
 3. Відкладено (за рішенням користувача): формат номерів об'єктів/техніки/
