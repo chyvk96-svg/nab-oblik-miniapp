@@ -10,6 +10,11 @@ tmp/
 *.log
 node_modules/
 
+# Службові файли Supabase CLI (у репо — лише код функцій supabase/functions/)
+supabase/.temp/
+supabase/.branches/
+supabase/config.toml
+
 # Системні файли
 .DS_Store
 Thumbs.db
