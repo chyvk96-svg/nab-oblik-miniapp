@@ -768,19 +768,7 @@ async function sendHoursToTelegram(btn, viewer, subject, from, to, confirmed, pe
 
     btn.textContent = 'Надсилання...';
 
-    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/exports/${path}`, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': XLSX_MIME,
-        'x-upsert': 'false'
-      },
-      body: new Blob([buffer], { type: XLSX_MIME })
-    });
-    if (!res.ok) {
-      throw new Error('не вдалося зберегти файл у сховище: ' + (await res.text()));
-    }
+    await supaStorageUpload('exports', path, new Blob([buffer], { type: XLSX_MIME }), XLSX_MIME);
 
     await supaInsert('export_files', {
       user_id: viewer.id,             // хто вивантажує — йому бот надішле файл

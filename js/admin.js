@@ -1303,20 +1303,7 @@ const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.s
 async function sendXlsxBufferToBot(buffer, { fileName, viewer, exportType, from, to, caption }) {
   const path = `${exportUuid()}/${fileName}`;
 
-  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/exports/${path}`, {
-    method: 'POST',
-    headers: {
-      'apikey': SUPABASE_KEY,
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': XLSX_MIME,
-      'x-upsert': 'false'
-    },
-    body: new Blob([buffer], { type: XLSX_MIME })
-  });
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error('не вдалося зберегти файл у сховище: ' + errText);
-  }
+  await supaStorageUpload('exports', path, new Blob([buffer], { type: XLSX_MIME }), XLSX_MIME);
 
   await supaInsert('export_files', {
     user_id: viewer.id,
