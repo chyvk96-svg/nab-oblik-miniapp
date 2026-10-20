@@ -190,7 +190,9 @@ supabase/functions/export-1c/ — Edge Function для 1С (з 20.10): лише 
   "Схвалити" → `renderAddUser(user, {fullName, telegramId, onBack})`; запит
   стає "Схвалено" тригером `nab_access_request_approved`, щойно створено users
   з цим telegram_id. Сповіщення в Telegram не потрібне (рішення користувача).
-- **1С:** `export-1c` (`GET ?from&to[&object_id]`, заголовок `X-Api-Key` =
+- **1С:** `export-1c` (`GET ?from&to[&object_code]`; у відповіді лише коди 1С —
+  «Код / номер» об'єкта/техніки/оператора, ЄДРПОУ замовника, без OBJ-/EQ-/
+  USR-/CST-; ключ звіту `report_id`), заголовок `X-Api-Key` =
   секрет `ONEC_API_TOKEN`; не publishable і НЕ ключ Make); звернення — у
   `api_access_log` (видно в "Журнал" → "Входи"). Інструкція —
   `docs/1C_export_API.md` і `.docx`. Розгортання — як tg-auth, з копії в scratchpad.
