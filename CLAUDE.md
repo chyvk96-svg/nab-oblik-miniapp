@@ -5,8 +5,8 @@
 бізнес-логіка, схема бази й історія — у папці `docs/` (вона **не**
 потрапляє в GitHub, див. розділ 12).
 
-> Актуалізовано: **2026-10-19**. Останній коміт коду на цю дату:
-> `2330828` (19.10, Mini App працює з пропуском tg-auth).
+> Актуалізовано: **2026-10-20**. Останній коміт коду на цю дату:
+> `1635e8b` (20.10, вхід без запасного шляху). **З 20.10 у базі увімкнено RLS.**
 
 ---
 
@@ -112,7 +112,7 @@ Excel-звіти (файл приходить у Telegram-бот).
 
 ```
 Користувач (Telegram) ──► Mini App (GitHub Pages, vanilla JS)
-                              │ REST (PostgREST), publishable key
+                              │ REST (PostgREST), пропуск від Edge Function tg-auth (RLS)
                               ▼
                           Supabase (PostgreSQL) — єдине джерело правди
                               │ Database Webhooks (INSERT/UPDATE)
@@ -165,7 +165,7 @@ index.html
   js/admin.js
   js/admin-manage.js
   js/accountant.js
-  js/router.js             — точка входу: tg.ready(), вхід через tg-auth (запасний шлях — users за telegram_id), маршрут за роллю
+  js/router.js             — точка входу: tg.ready(), вхід через tg-auth (2 спроби, кнопка "Спробувати ще раз"), маршрут за роллю
 supabase/functions/tg-auth/ — Edge Function входу (index.ts, verify.ts); НЕ частина Mini App
 ```
 
@@ -181,9 +181,11 @@ supabase/functions/tg-auth/ — Edge Function входу (index.ts, verify.ts); 
 - **`supabase-client.js`**: `authSignIn`, `supaFetch` (усі `supa*` і
   `supaStorageUpload` ідуть з пропуском), оновлення за 5 хв до кінця
   (`authRenew` — одне на всі запити; refresh → не вийшло → повторний вхід),
-  401 → оновлення + 1 повтор. **Запасний шлях** (поки RLS вимкнено): немає
-  пропуску → publishable key + `errors` `action_id = 'TG_AUTH'`. Після RLS
-  запасний шлях перестане працювати — замінити на "перезапусти Mini App".
+  401 → оновлення + 1 повтор. **Запасного шляху немає** (з 20.10, RLS):
+  немає пропуску → помилка "Сесія завершилась — закрий і відкрий Mini App
+  знову". Ліміт `tg-auth` 20 с; `router.js` — 2 спроби, потім кнопка.
+  Збої входу пише в `errors` сам `tg-auth` (`action_id = 'TG_AUTH'`,
+  `source = 'tg-auth'`).
 - Прямих `fetch` до Supabase в інших файлах **не писати** — лише через
   `supa*` / `supaStorageUpload`, інакше запит піде без пропуску.
 
@@ -265,20 +267,32 @@ supabase/functions/tg-auth/ — Edge Function входу (index.ts, verify.ts); 
   проєкт акаунта не чіпати (правило 5а). Структура — також у
   `docs/supabase_schema.sql` і `docs/DB_Schema_Document.md`; при сумніві —
   перевірочний `select` через CLI.
-- **RLS вимкнено на всіх таблицях** (свідомо, план посилення —
-  `docs/Automation_Logic_Overview.md`, розділ 9.1). Mini App і Make
-  працюють як роль `anon` через publishable key.
+- **RLS увімкнено на всіх 18 таблицях (з 2026-10-20).** Правила
+  `nab_active_select/insert/update/delete` для `authenticated`: лише
+  `(select public.nab_is_active_user())` — пропуск tg-auth належить
+  активному `users`. **`anon` не має жодних прав** (publishable key сам по
+  собі нічого не відкриває). Make і `tg-auth` — секретний ключ
+  (`service_role`), оминають RLS. Права за ролями — наступний крок.
+  Відкат — `docs/migrations/2026-10-20_rls_whitelist_ROLLBACK.sql`.
+- **Перевірити як користувач** (сухий прогін, без змін): у транзакції
+  `set_config('request.jwt.claims', '{"role":"authenticated","app_metadata":{"nab_user_id":"USR-…"}}', true)`
+  + `set local role authenticated`, у кінці `raise exception` з результатами —
+  транзакція скасовується (так перевірено міграцію RLS 19.10).
 - **Міграції:** створюй файл `docs/migrations/РРРР-ММ-ДД_назва.sql`:
   - лише `create or replace`, `add column if not exists`,
     `create index if not exists` — щоб повторний запуск був безпечним;
-  - **нові таблиці (з 30.10.2026) — обов'язково GRANT**, інакше API
-    поверне `permission denied`:
+  - **нові таблиці (з 2026-10-20, RLS) — GRANT + RLS + 4 правила**, інакше
+    API поверне `permission denied` або порожньо. **`anon` — НІКОЛИ:**
     ```sql
-    grant select, insert, update, delete on public.<таблиця> to anon;
-    grant select, insert, update, delete on public.<таблиця> to authenticated;
-    grant select, insert, update, delete on public.<таблиця> to service_role;
+    grant select, insert, update, delete on public.<таблиця> to authenticated, service_role;
+    alter table public.<таблиця> enable row level security;
+    create policy nab_active_select on public.<таблиця> for select to authenticated using ((select public.nab_is_active_user()));
+    create policy nab_active_insert on public.<таблиця> for insert to authenticated with check ((select public.nab_is_active_user()));
+    create policy nab_active_update on public.<таблиця> for update to authenticated using ((select public.nab_is_active_user())) with check ((select public.nab_is_active_user()));
+    create policy nab_active_delete on public.<таблиця> for delete to authenticated using ((select public.nab_is_active_user()));
     ```
-  - нові функції, які викликає Mini App, — `grant execute on function ... to anon, authenticated, service_role;`
+  - нові функції, які викликає Mini App, — `grant execute on function ... to authenticated, service_role;`
+    (+ `revoke execute ... from public, anon` — за замовчуванням Postgres дає всім)
   - у кінці файлу — закоментовані **тестові запити**, щоб користувач
     перевірив результат;
   - попередь користувача: Supabase показує "Potential issue detected /
@@ -466,7 +480,8 @@ Make (MCP) — давай користувачу покрокові інстру
 | `[400] Bad Request: chat not found` | Людина не натиснула Start у `@nadvirna_avtobaza_bot` або неправильний `users.telegram_id` (звірити через `@userinfobot`). Або людина помилково стоїть відповідальним/роллю |
 | Зміни не видно в Mini App | Кеш Telegram / GitHub Pages ще не оновився (розділ 3) |
 | `duplicate key … already exists` | Лічильник `id_counters` відстав → `sync_id_counters.sql` |
-| `permission denied` на новій таблиці | Немає GRANT для `anon` (розділ 7) |
+| `permission denied` на новій таблиці | Немає GRANT для `authenticated` або RLS-правил (розділ 7) |
+| "Не вдалося увійти" / "Сесія завершилась" | Дивись `errors` з `action_id = 'TG_AUTH'` (пише `tg-auth`): `403 not_found` — немає в `users` / неправильний `telegram_id`; `inactive`; `401 expired` — старий initData (закрити й відкрити Mini App); таймаут — слабкий інтернет |
 | `invalid input syntax for type time` | У поле часу пішло "—" або неповний час; лише `ГГ:ХВ` або NULL |
 | Excel "відновлення книги" | Апостроф `'` у назві аркуша → `xlNewSheet` замінює на `’` |
 | Дублі звітів | Захист з 25.09 (черга чернеток + пошук дублів); старі дублі адмін видаляє ("⚠ СХОЖЕ НА ДУБЛЬ") |
@@ -489,13 +504,13 @@ Make (MCP) — давай користувачу покрокові інстру
 
 ## 15. Поточний стан і найближчі кроки
 
-Див. **`docs/TODO.md`** — там актуальний перелік. Коротко на 19.10:
-1. 🔐 **В РОБОТІ: захист даних (RLS + initData)** — по одному кроку з
-   перевіркою (вимога користувача). Зроблено: Make на секретному ключі
-   (перевірено 15–19.10), Edge Function `tg-auth`, Mini App працює з
-   пропуском (19.10, `2330828`; Excel перевірено). **20.10 — перевірка на
-   реальних звітах**, далі — RLS на всіх таблицях + `revoke anon`. План і
-   стан — `docs/TODO.md`, розділ "🔐 ЗАХИСТ ДАНИХ".
+Див. **`docs/TODO.md`** — там актуальний перелік. Коротко на 20.10:
+1. 🔐 **Захист даних:** ✅ Make на секретному ключі, ✅ `tg-auth`, ✅ Mini App
+   з пропуском, ✅ **RLS увімкнено 20.10** (anon без прав). 21.10 вранці —
+   перевірити перші реальні звіти й Make. Далі — **права за ролями** +
+   **👑 власник системи USR-001** (лише він: керувати адмінами, видаляти
+   назавжди, журнал, аварійне блокування; уточнити видалення користувачів/
+   замовників/техніки). План і стан — `docs/TODO.md`.
 2. ✅ Перевірено 14.10: "основний + другий оператор"; ЄДРПОУ / "Код /
    номер" / пошук у довідниках.
 3. Відкладено (за рішенням користувача): формат номерів об'єктів/техніки/
