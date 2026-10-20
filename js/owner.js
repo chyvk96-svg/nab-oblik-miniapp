@@ -103,8 +103,13 @@ function journalRecordTitle(row) {
   return src.full_name || src.name || (src.work_date ? `дата ${formatDateUA(String(src.work_date).slice(0, 10))}` : '');
 }
 
+// Відмова входу людини або відмова зверненню 1С (з 2026-10-20)
+function isJournalRefusal(kind) {
+  return String(kind || '').startsWith('Відмова');
+}
+
 function journalChipClass(action) {
-  if (action === 'Видалено' || action === 'Відмова входу') return 'status-corr';
+  if (action === 'Видалено' || isJournalRefusal(action)) return 'status-corr';
   if (action === 'Змінено') return 'status-wait';
   return 'status-final';
 }
@@ -346,14 +351,14 @@ async function loadJournalLogins(user) {
     return;
   }
 
-  const failed = rows.filter(r => r.kind !== 'Вхід').length;
+  const failed = rows.filter(r => isJournalRefusal(r.kind)).length;
   listEl.className = '';
   listEl.innerHTML = `
-    <div class="meta" style="margin:0 0 8px">Період: ${journalPeriodText()} · входів: ${rows.length - failed} · відмов: <b${failed ? ' style="color:var(--danger)"' : ''}>${failed}</b></div>
+    <div class="meta" style="margin:0 0 8px">Період: ${journalPeriodText()} · входів і звернень 1С: ${rows.length - failed} · відмов: <b${failed ? ' style="color:var(--danger)"' : ''}>${failed}</b></div>
     <button type="button" class="btn-add-top" id="jl-excel-btn">📥 Надіслати в Telegram</button>
     <div class="hint-inline" style="text-align:center;margin:-10px 0 14px">Файл Excel прийде вам у чат з ботом.</div>
     ${rows.map(r => `
-      <div class="report-card"${r.kind !== 'Вхід' ? ' style="border-left-color:var(--danger)"' : ''}>
+      <div class="report-card"${isJournalRefusal(r.kind) ? ' style="border-left-color:var(--danger)"' : ''}>
         <div class="top-row">
           <span class="date">${formatDateTimeUA(r.at)}</span>
           <span class="status-chip ${journalChipClass(r.kind)}">${escHtml(r.kind)}</span>
@@ -538,17 +543,17 @@ function exportJournalLoginsExcel(btn, user, rows) {
     const wb = new ExcelJS.Workbook();
     wb.creator = 'НАБ ТехОблік';
     wb.created = new Date();
-    const failed = rows.filter(r => r.kind !== 'Вхід').length;
+    const failed = rows.filter(r => isJournalRefusal(r.kind)).length;
 
     xlStyledSheet(wb, 'Входи', {
       title: 'Журнал входів',
       subtitle: 'Вхід — пропуск видано; Відмова входу — немає в системі, неактивний, підроблені або застарілі дані Telegram',
-      note: `Період: ${journalPeriodText()} · входів: ${rows.length - failed} · відмов: ${failed}`,
+      note: `Період: ${journalPeriodText()} · входів і звернень 1С: ${rows.length - failed} · відмов: ${failed}`,
       columns: [
         { header: 'Дата і час', width: 17, type: 'text', get: r => formatDateTimeUA(r.at) },
         { header: 'Хто', width: 32, type: 'name', get: r => r.user_name || '' },
         { header: 'Подія', width: 16, type: 'text', get: r => r.kind,
-          fillOf: r => (r.kind === 'Вхід' ? XL.statusFinal : XL.statusCorr) },
+          fillOf: r => (isJournalRefusal(r.kind) ? XL.statusCorr : XL.statusFinal) },
         { header: 'Деталі', width: 60, type: 'long', get: r => r.details || '' }
       ],
       rows
