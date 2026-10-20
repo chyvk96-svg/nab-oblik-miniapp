@@ -78,6 +78,42 @@ async function logFail(admin: Admin, telegramId: number | null, userName: string
   }
 }
 
+// (з 2026-10-20) 📨 Запит доступу: людини немає в users → створити запит (або
+// оновити "востаннє" і лічильник). Підпис уже перевірено — ім'я й ID справжні.
+// Повертає 'created' / 'pending' / 'rejected' / 'error' — для повідомлення в Mini App.
+async function upsertAccessRequest(admin: Admin, telegramId: number, tgUser: Record<string, unknown>): Promise<string> {
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : null);
+  const names = { first_name: str(tgUser.first_name), last_name: str(tgUser.last_name), username: str(tgUser.username) };
+  try {
+    const { data: existing, error: selErr } = await admin
+      .from('access_requests')
+      .select('id,status,attempts')
+      .eq('telegram_id', telegramId)
+      .maybeSingle();
+    if (selErr) throw selErr;
+
+    if (existing) {
+      // Схвалено, а людини в users немає (видалили) — запит знову "Нова"
+      const reopen = existing.status === 'Схвалено'
+        ? { status: 'Нова', decided_at: null, decided_by: null, user_id: null }
+        : {};
+      await admin.from('access_requests')
+        .update({ ...names, ...reopen, last_seen_at: new Date().toISOString(), attempts: (existing.attempts || 0) + 1 })
+        .eq('id', existing.id);
+      return existing.status === 'Відхилено' ? 'rejected' : 'pending';
+    }
+
+    const { data: reqId, error: idErr } = await admin.rpc('next_id', { p_prefix: 'REQ' });
+    if (idErr || !reqId) throw idErr || new Error('next_id REQ');
+    const { error: insErr } = await admin.from('access_requests').insert({ id: reqId, telegram_id: telegramId, ...names });
+    if (insErr) return 'pending'; // два відкриття одночасно — запит уже створено
+    return 'created';
+  } catch (e) {
+    console.error('tg-auth: access request', (e as Error)?.message);
+    return 'error';
+  }
+}
+
 // Telegram ID з НЕперевіреного initData — лише для запису збою підпису/віку
 function claimedTelegramId(initData: string): number | null {
   try {
@@ -134,8 +170,9 @@ Deno.serve(async (req: Request) => {
   }
   const nabUser = rows?.[0];
   if (!nabUser) {
-    await logFail(admin, tgId, `${tgName} (немає в users)`, '403 not_found');
-    return json(req, 403, { error: 'not_found' });
+    const request = await upsertAccessRequest(admin, tgId, check.user);
+    await logFail(admin, tgId, `${tgName} (немає в users)`, `403 not_found · запит доступу: ${request}`);
+    return json(req, 403, { error: 'not_found', request });
   }
   const nabName = `${nabUser.full_name} (${nabUser.role})`;
   if (nabUser.status !== 'Активний') {

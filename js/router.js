@@ -5,6 +5,9 @@ tg.ready();
 tg.expand();
 
 const MSG_NOT_FOUND = 'Тебе не знайдено в системі. Зверніться до адміністратора.';
+// (з 2026-10-20) 📨 tg-auth сам створює запит доступу для нової людини
+const MSG_REQUEST_SENT = 'Тебе ще немає в системі. Запит на доступ надіслано адміністратору — щойно його схвалять, закрий і відкрий Mini App знову.';
+const MSG_REQUEST_REJECTED = 'Доступ не надано. Якщо це помилка — зверніться до адміністратора.';
 const MSG_INACTIVE = 'Твій обліковий запис неактивний. Зверніться до адміністратора.';
 const MSG_LOGIN_FAILED = 'Не вдалося увійти. Натисни «Спробувати ще раз» або закрий Mini App повністю і відкрий знову. Якщо повторюється — напиши адміністратору.';
 const MSG_LOGIN_EXPIRED = 'Дані входу від Telegram застаріли. Закрий Mini App повністю і відкрий знову. Якщо повторюється — напиши адміністратору.';
@@ -21,7 +24,11 @@ async function signInWithRetry() {
     try {
       const r = await authSignIn(tg.initData || '');
       if (r.ok) return { user: r.user };
-      if (r.status === 403 && r.error === 'not_found') return { message: MSG_NOT_FOUND };
+      if (r.status === 403 && r.error === 'not_found') {
+        if (r.request === 'created' || r.request === 'pending') return { message: MSG_REQUEST_SENT };
+        if (r.request === 'rejected') return { message: MSG_REQUEST_REJECTED };
+        return { message: MSG_NOT_FOUND };
+      }
       if (r.status === 403 && r.error === 'inactive') return { message: MSG_INACTIVE };
       // Поганий підпис / застарілий initData — повтор з тими самими даними не допоможе
       if (r.status === 401) return { failed: true, expired: true };

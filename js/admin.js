@@ -25,6 +25,14 @@ function renderAdminHome(user) {
           Журнал
           <span class="sub">👑 Лише власник: хто що змінив, входи, спроби чужих</span>
         </span>
+      </button>
+      <button class="menu-btn" id="btn-owner-requests">
+        <span class="emoji">📨</span>
+        <span>
+          Запити доступу
+          <span class="sub">👑 Нові люди, що відкрили Mini App</span>
+        </span>
+        ${countBadgeHtml('requests-badge', 'var(--danger)', '#fff')}
       </button>` : ''}
       <button class="menu-btn" id="btn-pending">
         <span class="emoji">✅</span>
@@ -124,6 +132,8 @@ function renderAdminHome(user) {
   // (з 2026-10-20) 👑 Журнал — лише власнику (owner.js); дані база віддає теж лише йому
   if (user.is_owner) {
     document.getElementById('btn-owner-journal').addEventListener('click', () => renderOwnerJournal(user));
+    document.getElementById('btn-owner-requests').addEventListener('click', () => renderAccessRequests(user));
+    loadAccessRequestsBadge();
   }
   document.getElementById('btn-pending').addEventListener('click', () => renderPendingApprovals(user));
   document.getElementById('btn-history').addEventListener('click', () => renderApprovalHistory(user));
@@ -339,15 +349,19 @@ async function renderOperatorHoursPick(user) {
 
 // ---------- Додати нового користувача ----------
 
-async function renderAddUser(user) {
+// prefill (з 2026-10-20, 📨 запити доступу): { fullName, telegramId, onBack } —
+// форма відкривається з екрана запитів з підставленими ПІБ і Telegram ID.
+// Запит сам стає "Схвалено" тригером у базі, щойно користувача створено.
+async function renderAddUser(user, prefill = null) {
+  const goBack = prefill?.onBack || (() => renderAdminHome(user));
   app.innerHTML = `
-    ${topbarHtml('Додати користувача', roleSubtitle(user))}
+    ${topbarHtml(prefill ? 'Схвалити запит доступу' : 'Додати користувача', roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-menu-adduser" style="margin:0 0 14px">← Назад до меню</div>
+      <div class="back-link" id="back-to-menu-adduser" style="margin:0 0 14px">${prefill ? '← Назад до запитів' : '← Назад до меню'}</div>
       <div id="add-user-body" class="msg">Завантаження...</div>
     </div>
   `;
-  document.getElementById('back-to-menu-adduser').addEventListener('click', () => renderAdminHome(user));
+  document.getElementById('back-to-menu-adduser').addEventListener('click', goBack);
 
   const bodyEl = document.getElementById('add-user-body');
 
@@ -372,14 +386,15 @@ async function renderAddUser(user) {
         <div class="section-title"><span class="n">1</span><span class="icon">👤</span>Новий користувач</div>
 
         <label>ПІБ</label>
-        <input type="text" id="new_user_name" required placeholder="Прізвище Ім'я">
+        <input type="text" id="new_user_name" required placeholder="Прізвище Ім'я" value="${escHtml(prefill?.fullName || '')}">
+        ${prefill ? '<div class="hint-inline">Ім\'я взято з Telegram — виправ на справжнє ПІБ, якщо треба</div>' : ''}
 
         <label>Код / номер</label>
         <input type="text" id="new_user_code" placeholder="Необов'язково">
 
         <label>Telegram ID</label>
-        <input type="number" id="new_user_telegram_id" required placeholder="Наприклад: 123456789">
-        <div class="hint-inline">Працівник дізнається свій Telegram ID через бота @userinfobot і повідомляє тобі</div>
+        <input type="number" id="new_user_telegram_id" required placeholder="Наприклад: 123456789" value="${escHtml(prefill?.telegramId ?? '')}">
+        <div class="hint-inline">${prefill ? 'Telegram ID підставлено з запиту — точний, змінювати не треба' : 'Працівник дізнається свій Telegram ID через бота @userinfobot і повідомляє тобі'}</div>
 
         <label>Телефон</label>
         <input type="text" id="new_user_phone" placeholder="Необов'язково">
@@ -404,7 +419,7 @@ async function renderAddUser(user) {
         `).join('')}
       </div>
 
-      <button type="submit" id="add-user-submit-btn">Створити користувача</button>
+      <button type="submit" id="add-user-submit-btn">${prefill ? 'Схвалити і створити користувача' : 'Створити користувача'}</button>
       <div class="error-text hidden" id="add-user-error-box"></div>
     </form>
   `;
@@ -475,18 +490,19 @@ async function renderAddUser(user) {
       app.innerHTML = `
         <div class="wrap">
         <div class="success-box">
-          <div>✅ Користувача успішно створено</div>
+          <div>${prefill ? '✅ Доступ надано — користувача створено' : '✅ Користувача успішно створено'}</div>
           <div class="stamp">${newUserId}</div>
+          ${prefill ? '<div class="hint-inline" style="margin-top:8px">Скажи людині закрити й відкрити Mini App знову.</div>' : ''}
         </div>
-        <button type="button" id="back-home-btn" style="background:var(--asphalt);color:var(--brand-yellow);width:100%;padding:14px;border:none;border-radius:4px;font-family:'Oswald',sans-serif;font-weight:600;font-size:14px;text-transform:uppercase;letter-spacing:0.03em;cursor:pointer">На головну</button>
+        <button type="button" id="back-home-btn" style="background:var(--asphalt);color:var(--brand-yellow);width:100%;padding:14px;border:none;border-radius:4px;font-family:'Oswald',sans-serif;font-weight:600;font-size:14px;text-transform:uppercase;letter-spacing:0.03em;cursor:pointer">${prefill ? 'До запитів' : 'На головну'}</button>
         </div>
       `;
-      document.getElementById('back-home-btn').addEventListener('click', () => renderAdminHome(user));
+      document.getElementById('back-home-btn').addEventListener('click', prefill ? goBack : () => renderAdminHome(user));
     } catch (err) {
       errorBox.textContent = err.message;
       errorBox.classList.remove('hidden');
       submitBtn.disabled = false;
-      submitBtn.textContent = "Створити користувача";
+      submitBtn.textContent = prefill ? 'Схвалити і створити користувача' : 'Створити користувача';
     }
   });
 }

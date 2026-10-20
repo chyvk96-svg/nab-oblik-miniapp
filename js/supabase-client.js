@@ -52,7 +52,8 @@ async function authSignIn(initData) {
     authSetSession(body);
     return { ok: true, user: body.user };
   }
-  return { ok: false, status: res.status, error: body.error || '?', reason: body.reason || '' };
+  // request — стан запиту доступу при 403 not_found (з 2026-10-20): created / pending / rejected
+  return { ok: false, status: res.status, error: body.error || '?', reason: body.reason || '', request: body.request || '' };
 }
 
 async function authRefresh() {

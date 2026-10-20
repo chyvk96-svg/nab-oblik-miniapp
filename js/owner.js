@@ -25,7 +25,8 @@ const JOURNAL_TABLES = {
   incidents: 'Поломки',
   maintenance: 'ТО',
   menu_buttons: 'Кнопки меню',
-  roles: 'Ролі'
+  roles: 'Ролі',
+  access_requests: 'Запити доступу'
 };
 
 const JOURNAL_ACTIONS = ['Створено', 'Подано', 'Змінено', 'Видалено'];
@@ -365,6 +366,124 @@ async function loadJournalLogins(user) {
 
   const excelBtn = document.getElementById('jl-excel-btn');
   excelBtn.addEventListener('click', () => exportJournalLoginsExcel(excelBtn, user, rows));
+}
+
+// ---------- 📨 Запити доступу (з 2026-10-20) ----------
+// Запит створює tg-auth, коли людини немає в users. Бачить і схвалює лише
+// власник. "Схвалити" → форма renderAddUser з підставленими ПІБ і Telegram ID;
+// щойно користувача створено, тригер у базі сам ставить запиту "Схвалено".
+
+async function loadAccessRequestsBadge() {
+  let rows;
+  try {
+    rows = await supaGet('access_requests', 'status=eq.Нова&select=id');
+  } catch (e) {
+    return;
+  }
+  const badge = document.getElementById('requests-badge');
+  if (!badge) return; // уже пішли з меню
+  const n = (rows || []).length;
+  badge.textContent = n > 99 ? '99+' : String(n);
+  badge.classList.toggle('hidden', n === 0);
+}
+
+function accessRequestName(r) {
+  return [r.first_name, r.last_name].filter(Boolean).join(' ').trim();
+}
+
+function accessRequestCardHtml(r) {
+  const name = accessRequestName(r);
+  const isNew = r.status === 'Нова';
+  return `
+    <div class="report-card"${isNew ? '' : ' style="opacity:0.85"'}>
+      <div class="top-row">
+        <span class="date">${escHtml(name || 'Без імені')}</span>
+        <span class="status-chip ${isNew ? 'status-wait' : 'status-corr'}">${escHtml(r.status)}</span>
+      </div>
+      <div class="meta">${r.username ? '@' + escHtml(r.username) + ' · ' : ''}Telegram ID: ${escHtml(r.telegram_id)}</div>
+      <div class="detail-row">Вперше: ${formatDateTimeUA(r.first_seen_at)} · востаннє: ${formatDateTimeUA(r.last_seen_at)} · відкривав: ${escHtml(r.attempts)} раз</div>
+      ${isNew ? '' : `<div class="detail-row">Відхилено: ${r.decided_at ? formatDateTimeUA(r.decided_at) : '—'}</div>`}
+      <div class="action-row" style="display:flex;gap:8px;margin-top:10px">
+        <button type="button" class="btn-confirm" data-req-approve="${escHtml(r.id)}">✅ Схвалити</button>
+        ${isNew ? `<button type="button" class="btn-reject" data-req-reject="${escHtml(r.id)}">✖ Відхилити</button>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+async function renderAccessRequests(user) {
+  if (!user.is_owner) {
+    renderAdminHome(user);
+    return;
+  }
+  app.innerHTML = `
+    ${topbarHtml('📨 Запити доступу', 'Лише власник системи')}
+    <div class="wrap" style="padding-top:14px">
+      <div class="back-link" id="back-to-menu-requests" style="margin:0 0 14px">← Назад до меню</div>
+      <div class="hint-inline" style="margin:0 0 12px">
+        Запит з'являється сам, коли людина, якої ще немає в системі, відкриває Mini App.
+        Ім'я й Telegram ID — з її Telegram (справжні). Після схвалення скажи людині закрити й відкрити Mini App знову.
+      </div>
+      <div id="req-list" class="msg">Завантаження...</div>
+    </div>
+  `;
+  document.getElementById('back-to-menu-requests').addEventListener('click', () => renderAdminHome(user));
+
+  const listEl = document.getElementById('req-list');
+  let rows;
+  try {
+    rows = await supaGet('access_requests', 'select=*&status=in.(Нова,Відхилено)&order=last_seen_at.desc');
+  } catch (e) {
+    listEl.textContent = 'Помилка завантаження: ' + e.message;
+    return;
+  }
+
+  const fresh = (rows || []).filter(r => r.status === 'Нова');
+  const rejected = (rows || []).filter(r => r.status === 'Відхилено');
+
+  listEl.className = '';
+  listEl.innerHTML = `
+    ${fresh.length ? fresh.map(accessRequestCardHtml).join('') : '<div class="msg" style="padding:24px 10px">Нових запитів немає.</div>'}
+    ${rejected.length ? `
+      <details style="margin-top:14px">
+        <summary class="meta" style="cursor:pointer;margin-bottom:8px">Відхилені (${rejected.length})</summary>
+        ${rejected.map(accessRequestCardHtml).join('')}
+      </details>` : ''}
+  `;
+
+  const byId = id => (rows || []).find(r => r.id === id);
+
+  listEl.querySelectorAll('[data-req-approve]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const r = byId(btn.getAttribute('data-req-approve'));
+      if (!r) return;
+      renderAddUser(user, {
+        fullName: accessRequestName(r),
+        telegramId: r.telegram_id,
+        onBack: () => renderAccessRequests(user)
+      });
+    });
+  });
+
+  listEl.querySelectorAll('[data-req-reject]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const r = byId(btn.getAttribute('data-req-reject'));
+      if (!r) return;
+      if (!confirm(`Відхилити запит від ${accessRequestName(r) || 'Telegram ID ' + r.telegram_id}?\nЛюдина не отримає доступу. Схвалити можна буде пізніше в розділі "Відхилені".`)) return;
+      btn.disabled = true;
+      try {
+        await supaUpdate('access_requests', `id=eq.${encodeURIComponent(r.id)}`, {
+          status: 'Відхилено',
+          decided_at: new Date().toISOString(),
+          decided_by: user.id
+        });
+        renderAccessRequests(user);
+      } catch (e) {
+        alert('Помилка: ' + e.message);
+        btn.disabled = false;
+      }
+    });
+  });
 }
 
 // ---------- Excel ----------
