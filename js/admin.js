@@ -18,6 +18,14 @@ function renderAdminHome(user) {
   app.innerHTML = `
     ${topbarHtml('Головне меню', roleSubtitle(user))}
     <div class="menu-list">
+      ${user.is_owner ? `
+      <button class="menu-btn" id="btn-owner-journal">
+        <span class="emoji">📜</span>
+        <span>
+          Журнал
+          <span class="sub">👑 Лише власник: хто що змінив, входи, спроби чужих</span>
+        </span>
+      </button>` : ''}
       <button class="menu-btn" id="btn-pending">
         <span class="emoji">✅</span>
         <span>
@@ -113,6 +121,10 @@ function renderAdminHome(user) {
       </button>
     </div>
   `;
+  // (з 2026-10-20) 👑 Журнал — лише власнику (owner.js); дані база віддає теж лише йому
+  if (user.is_owner) {
+    document.getElementById('btn-owner-journal').addEventListener('click', () => renderOwnerJournal(user));
+  }
   document.getElementById('btn-pending').addEventListener('click', () => renderPendingApprovals(user));
   document.getElementById('btn-history').addEventListener('click', () => renderApprovalHistory(user));
   document.getElementById('btn-add-object').addEventListener('click', () => renderAddObject(user));
