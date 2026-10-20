@@ -7,16 +7,15 @@
 // з пропуском (роль authenticated) замість publishable key. Пропуск діє ~1 год:
 // перед запитом, якщо до кінця < 5 хв, — оновлення (refresh_token), не вийшло —
 // повторний вхід через tg-auth (initData дійсний 24 год).
-// ЗАПАСНИЙ ШЛЯХ (поки RLS вимкнено): немає пропуску → запит з publishable key,
-// як раніше, збій пишеться в errors (action_id = 'TG_AUTH'). Після вмикання RLS
-// запасний шлях перестане працювати — тоді замінити на повідомлення "перезапусти".
+// (з 2026-10-20, RLS) Запасного шляху з publishable key більше немає — база
+// його не пускає. Немає пропуску → помилка MSG_SESSION_ENDED (показують ті, хто
+// викликав supa*, як будь-яку іншу помилку). Збої входу пише в errors сам tg-auth.
 const AUTH_REFRESH_MARGIN_SEC = 300;
-const TG_AUTH_TIMEOUT_MS = 8000;
+const TG_AUTH_TIMEOUT_MS = 20000; // (з 2026-10-20; було 8 с — замало для слабкого інтернету)
+const MSG_SESSION_ENDED = 'Сесія завершилась — закрий і відкрий Mini App знову';
 
 let authSession = null;       // { access_token, refresh_token, expires_at }
 let authRenewPromise = null;  // одне оновлення на всі одночасні запити
-let authUserInfo = null;      // для запису збою в errors
-let authFallbackLogged = false;
 
 function authNowSec() {
   return Math.floor(Date.now() / 1000);
@@ -78,9 +77,8 @@ function authRenew() {
       try {
         const r = await authSignIn(window.Telegram?.WebApp?.initData || '');
         if (r.ok) return true;
-      } catch (e) { /* далі — запасний шлях */ }
+      } catch (e) { /* пропуску немає */ }
       authSession = null;
-      authLogFallback('не вдалося оновити пропуск — запасний шлях');
       return false;
     })().finally(() => { authRenewPromise = null; });
   }
@@ -88,45 +86,21 @@ function authRenew() {
 }
 
 async function authBearer() {
-  if (!authSession) return SUPABASE_KEY;
-  if (authNowSec() >= authSession.expires_at - AUTH_REFRESH_MARGIN_SEC) await authRenew();
-  return authSession ? authSession.access_token : SUPABASE_KEY;
+  if (authSession && authNowSec() >= authSession.expires_at - AUTH_REFRESH_MARGIN_SEC) await authRenew();
+  if (!authSession) throw new Error(MSG_SESSION_ENDED);
+  return authSession.access_token;
 }
 
-function authSetUserInfo(telegramId, user) {
-  authUserInfo = { telegram_id: telegramId, user_name: `${user.full_name} (${user.role})` };
-}
-
-// Запис збою пропуску в errors — один раз за відкриття Mini App, тихо
-async function authLogFallback(reason) {
-  if (authFallbackLogged) return;
-  authFallbackLogged = true;
-  try {
-    const errId = await supaRpc('next_id', { p_prefix: 'ERR' });
-    await supaInsert('errors', {
-      id: errId,
-      telegram_id: authUserInfo?.telegram_id ?? null,
-      user_name: authUserInfo?.user_name ?? null,
-      action_id: 'TG_AUTH',
-      description: String(reason).slice(0, 500),
-      source: 'Mini App'
-    });
-  } catch (e) {
-    // Тихо: запис збою не має заважати роботі
-  }
-}
-
-// Спільний запит до Supabase: пропуск (або publishable key) + один повтор після 401
+// Спільний запит до Supabase: пропуск + один повтор після 401 (пропуск протух)
 async function supaFetch(url, init = {}) {
   const send = bearer => fetch(url, {
     ...init,
     headers: { ...(init.headers || {}), 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${bearer}` }
   });
-  const bearer = await authBearer();
-  let res = await send(bearer);
-  if (res.status === 401 && bearer !== SUPABASE_KEY) {
+  let res = await send(await authBearer());
+  if (res.status === 401) {
     await authRenew();
-    res = await send(authSession ? authSession.access_token : SUPABASE_KEY);
+    res = await send(await authBearer());
   }
   return res;
 }

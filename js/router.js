@@ -6,6 +6,46 @@ tg.expand();
 
 const MSG_NOT_FOUND = 'Тебе не знайдено в системі. Зверніться до адміністратора.';
 const MSG_INACTIVE = 'Твій обліковий запис неактивний. Зверніться до адміністратора.';
+const MSG_LOGIN_FAILED = 'Не вдалося увійти. Натисни «Спробувати ще раз» або закрий Mini App повністю і відкрий знову. Якщо повторюється — напиши адміністратору.';
+const MSG_LOGIN_EXPIRED = 'Дані входу від Telegram застаріли. Закрий Mini App повністю і відкрий знову. Якщо повторюється — напиши адміністратору.';
+
+// (з 2026-10-20) На телефонах зі слабким інтернетом перша спроба входу буває
+// не встигає (20.10: двоє людей — відповідь не дійшла за 8 с) — тому друга
+// спроба автоматично, а потім кнопка "Спробувати ще раз".
+const LOGIN_ATTEMPTS = 2;
+const LOGIN_RETRY_PAUSE_MS = 1000;
+
+// Вхід через tg-auth з повтором. Повертає { user } | { message } | { failed: true, expired }
+async function signInWithRetry() {
+  for (let attempt = 1; attempt <= LOGIN_ATTEMPTS; attempt++) {
+    try {
+      const r = await authSignIn(tg.initData || '');
+      if (r.ok) return { user: r.user };
+      if (r.status === 403 && r.error === 'not_found') return { message: MSG_NOT_FOUND };
+      if (r.status === 403 && r.error === 'inactive') return { message: MSG_INACTIVE };
+      // Поганий підпис / застарілий initData — повтор з тими самими даними не допоможе
+      if (r.status === 401) return { failed: true, expired: true };
+    } catch (e) {
+      // таймаут або немає мережі — пробуємо ще раз
+    }
+    if (attempt < LOGIN_ATTEMPTS) {
+      renderMessage('Вхід… (ще одна спроба)');
+      await new Promise(resolve => setTimeout(resolve, LOGIN_RETRY_PAUSE_MS));
+    }
+  }
+  return { failed: true, expired: false };
+}
+
+function renderLoginFailed() {
+  app.innerHTML = `
+    <div class="msg">
+      ${MSG_LOGIN_FAILED}
+      <div style="margin-top: 20px;">
+        <button class="btn-confirm" id="login-retry" style="flex: none; padding: 12px 24px;">🔄 Спробувати ще раз</button>
+      </div>
+    </div>`;
+  document.getElementById('login-retry').onclick = () => main();
+}
 
 async function main() {
   const tgUser = tg.initDataUnsafe?.user;
@@ -15,52 +55,24 @@ async function main() {
     return;
   }
 
-  // (з 2026-10-19) Вхід із пропуском: tg-auth перевіряє підпис Telegram і видає
-  // сесію — далі всі запити supa* ідуть з нею (supabase-client.js).
-  let currentUser = null;
-  let authFail = '';
-  try {
-    const r = await authSignIn(tg.initData || '');
-    if (r.ok) {
-      currentUser = r.user;
-    } else if (r.status === 403 && r.error === 'not_found') {
-      renderMessage(MSG_NOT_FOUND);
-      return;
-    } else if (r.status === 403 && r.error === 'inactive') {
-      renderMessage(MSG_INACTIVE);
-      return;
-    } else {
-      authFail = `HTTP ${r.status}: ${r.error}${r.reason ? ' / ' + r.reason : ''}`;
-    }
-  } catch (e) {
-    authFail = e?.name === 'AbortError' ? 'timeout' : `network: ${e?.message || e}`;
+  // (з 2026-10-19) Вхід із пропуском: tg-auth перевіряє підпис Telegram, білий
+  // список users і видає сесію — далі всі запити supa* ідуть з нею
+  // (supabase-client.js). З 2026-10-20 (RLS) запасного шляху немає: база без
+  // пропуску не відповідає. Збої входу записує в errors сам tg-auth.
+  renderMessage('Вхід…');
+  const login = await signInWithRetry();
+
+  if (login.message) {
+    renderMessage(login.message);
+    return;
+  }
+  if (login.failed) {
+    if (login.expired) renderMessage(MSG_LOGIN_EXPIRED);
+    else renderLoginFailed();
+    return;
   }
 
-  // Запасний шлях (поки RLS вимкнено): як було до 19.10 — пошук у users з publishable key
-  if (!currentUser) {
-    let users;
-    try {
-      users = await supaGet('users', `telegram_id=eq.${tgUser.id}&select=id,full_name,role,status`);
-    } catch (e) {
-      renderMessage('Помилка з\'єднання з базою даних: ' + e.message);
-      return;
-    }
-
-    if (!users || users.length === 0) {
-      renderMessage(MSG_NOT_FOUND);
-      return;
-    }
-
-    currentUser = users[0];
-
-    if (currentUser.status !== 'Активний') {
-      renderMessage(MSG_INACTIVE);
-      return;
-    }
-  }
-
-  authSetUserInfo(tgUser.id, currentUser);
-  if (authFail) authLogFallback(`вхід: ${authFail} — запасний шлях`);
+  const currentUser = login.user;
 
   // "Водій" — не окрема роль, а лише позначка в списку користувачів:
   // у Mini App працює так само, як Оператор (те саме меню і форма звіту).

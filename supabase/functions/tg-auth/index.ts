@@ -56,6 +56,38 @@ const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') || '';
 
 const noSession = { auth: { persistSession: false, autoRefreshToken: false } };
 
+type Admin = ReturnType<typeof createClient>;
+
+// (з 2026-10-20) Збої входу пише сама функція (секретним ключем): після RLS
+// Mini App без пропуску записати в errors уже не зможе. Тихо — помилка запису
+// не впливає на відповідь.
+async function logFail(admin: Admin, telegramId: number | null, userName: string | null, description: string) {
+  try {
+    const { data: errId, error } = await admin.rpc('next_id', { p_prefix: 'ERR' });
+    if (error || !errId) return;
+    await admin.from('errors').insert({
+      id: errId,
+      telegram_id: telegramId,
+      user_name: userName,
+      action_id: 'TG_AUTH',
+      description: description.slice(0, 500),
+      source: 'tg-auth',
+    });
+  } catch (e) {
+    console.error('tg-auth: logFail', (e as Error)?.message);
+  }
+}
+
+// Telegram ID з НЕперевіреного initData — лише для запису збою підпису/віку
+function claimedTelegramId(initData: string): number | null {
+  try {
+    const id = Number(JSON.parse(new URLSearchParams(initData).get('user') || '{}')?.id);
+    return Number.isSafeInteger(id) && id > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders(req) });
   if (req.method !== 'POST') return json(req, 405, { error: 'method_not_allowed' });
@@ -74,11 +106,16 @@ Deno.serve(async (req: Request) => {
     return json(req, 400, { error: 'bad_request' });
   }
 
-  // 1) Підпис і вік
-  const check = await verifyInitData(initData, BOT_TOKEN);
-  if (!check.ok) return json(req, 401, { error: 'invalid_init_data', reason: check.reason });
-
   const admin = createClient(SUPABASE_URL, SECRET_KEY, noSession);
+
+  // 1) Підпис і вік. Порожні/безглузді запити не пишемо (щоб не засмічувати errors) —
+  // лише ті, де є Telegram ID: поганий підпис, прострочений initData тощо.
+  const check = await verifyInitData(initData, BOT_TOKEN);
+  if (!check.ok) {
+    const claimed = claimedTelegramId(initData);
+    if (claimed) await logFail(admin, claimed, null, `401 ${check.reason} (Telegram ID не перевірено)`);
+    return json(req, 401, { error: 'invalid_init_data', reason: check.reason });
+  }
 
   // 2) Білий список — так само, як router.js: перший запис з цим telegram_id
   const { data: rows, error: usersErr } = await admin
@@ -86,13 +123,32 @@ Deno.serve(async (req: Request) => {
     .select('id,full_name,role,status')
     .eq('telegram_id', check.telegramId)
     .limit(1);
+  const tgId = check.telegramId;
+  const tgName = [check.user.first_name, check.user.last_name].filter(Boolean).join(' ')
+    + (check.user.username ? ` @${check.user.username}` : '');
+
   if (usersErr) {
     console.error('tg-auth: users', usersErr.message);
+    await logFail(admin, tgId, tgName, `500 db_error: ${usersErr.message}`);
     return json(req, 500, { error: 'db_error' });
   }
   const nabUser = rows?.[0];
-  if (!nabUser) return json(req, 403, { error: 'not_found' });
-  if (nabUser.status !== 'Активний') return json(req, 403, { error: 'inactive' });
+  if (!nabUser) {
+    await logFail(admin, tgId, `${tgName} (немає в users)`, '403 not_found');
+    return json(req, 403, { error: 'not_found' });
+  }
+  const nabName = `${nabUser.full_name} (${nabUser.role})`;
+  if (nabUser.status !== 'Активний') {
+    await logFail(admin, tgId, nabName, `403 inactive (статус: ${nabUser.status})`);
+    return json(req, 403, { error: 'inactive' });
+  }
+
+  // Технічний збій видачі пропуску — записати і відповісти 500
+  const fail500 = async (error: string, msg?: string) => {
+    console.error(`tg-auth: ${error}`, msg);
+    await logFail(admin, tgId, nabName, `500 ${error}${msg ? ': ' + msg : ''}`);
+    return json(req, 500, { error });
+  };
 
   // 3) Запис у Supabase Auth (створюється один раз; повторно — "уже існує", це нормально)
   const email = `tg${check.telegramId}@nab-oblik.local`;
@@ -104,25 +160,20 @@ Deno.serve(async (req: Request) => {
     user_metadata: { full_name: nabUser.full_name },
   });
   if (createErr && createErr.status !== 422 && (createErr as { code?: string }).code !== 'email_exists') {
-    console.error('tg-auth: createUser', createErr.message);
-    return json(req, 500, { error: 'auth_create_failed' });
+    return await fail500('auth_create_failed', createErr.message);
   }
 
   // 4) Сесія: одноразове посилання (лист не надсилається) → обмін на сесію
   const { data: link, error: linkErr } = await admin.auth.admin.generateLink({ type: 'magiclink', email });
   if (linkErr || !link?.properties?.hashed_token) {
-    console.error('tg-auth: generateLink', linkErr?.message);
-    return json(req, 500, { error: 'auth_link_failed' });
+    return await fail500('auth_link_failed', linkErr?.message);
   }
 
   // Якщо telegram_id перейшов до іншого запису users — оновити прив'язку ДО видачі сесії
   const authUser = link.user;
   if (authUser && authUser.app_metadata?.nab_user_id !== nabUser.id) {
     const { error: updErr } = await admin.auth.admin.updateUserById(authUser.id, { app_metadata: appMeta });
-    if (updErr) {
-      console.error('tg-auth: updateUser', updErr.message);
-      return json(req, 500, { error: 'auth_update_failed' });
-    }
+    if (updErr) return await fail500('auth_update_failed', updErr.message);
   }
 
   const pub = createClient(SUPABASE_URL, PUBLIC_KEY, noSession);
@@ -130,10 +181,7 @@ Deno.serve(async (req: Request) => {
     token_hash: link.properties.hashed_token,
     type: 'email',
   });
-  if (otpErr || !otp?.session) {
-    console.error('tg-auth: verifyOtp', otpErr?.message);
-    return json(req, 500, { error: 'auth_session_failed' });
-  }
+  if (otpErr || !otp?.session) return await fail500('auth_session_failed', otpErr?.message);
 
   return json(req, 200, {
     access_token: otp.session.access_token,
