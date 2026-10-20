@@ -4,7 +4,12 @@
 // період (як аркуш "Звіти" у Excel "Звіт по об'єкту"). Лише читання, лише
 // потрібні поля — без телефонів, Telegram ID, Wialon, журналу.
 //
-//   GET /functions/v1/export-1c?from=2026-10-01&to=2026-10-31[&object_id=OBJ-001]
+//   GET /functions/v1/export-1c?from=2026-10-01&to=2026-10-31[&object_code=000000130]
+//
+// (з 2026-10-20) Об'єкт, техніка, оператор — лише "Код / номер" з довідників
+// (= код у 1С) і назва; замовник — ЄДРПОУ і назва. Внутрішніх номерів НАБ
+// (OBJ-/EQ-/USR-/CST-) у відповіді немає — на вимогу користувача. Лишається
+// report_id (REP-…) — унікальний ключ звіту для оновлення в 1С.
 //   Заголовок: X-Api-Key: <токен 1С>
 //
 // Токен — секрет ONEC_API_TOKEN (Supabase → Edge Functions → Secrets); його
@@ -62,11 +67,11 @@ function toOut(r: Row) {
     report_id: r.id,
     work_date: r.work_date,
     status: r.status,
-    object: { id: r.object_id, name: obj.name ?? null, code: obj.code ?? null },
-    customer: { id: cust.id ?? null, name: cust.name ?? null, edrpou: cust.edrpou ?? null },
+    object: { code: obj.code ?? null, name: obj.name ?? null },
+    customer: { edrpou: cust.edrpou ?? null, name: cust.name ?? null },
     customer_name_in_report: r.customer_name ?? null,
-    equipment: { id: r.equipment_id, name: r.equipment?.name ?? null, code: r.equipment?.code ?? null },
-    operator: { id: r.operator_id, full_name: r.operator?.full_name ?? null, code: r.operator?.code ?? null },
+    equipment: { code: r.equipment?.code ?? null, name: r.equipment?.name ?? null },
+    operator: { code: r.operator?.code ?? null, full_name: r.operator?.full_name ?? null },
     is_second_operator: !!r.is_second_operator,
     start_hours: num(r.start_hours),
     end_hours: num(r.end_hours),
@@ -96,7 +101,7 @@ function toOut(r: Row) {
 }
 
 const SELECT =
-  'id,work_date,status,object_id,objects(name,code,customers(id,name,edrpou)),customer_name,' +
+  'id,work_date,status,object_id,objects(name,code,customers(name,edrpou)),customer_name,' +
   'equipment_id,equipment(name,code),operator_id,operator:users!daily_reports_operator_id_fkey(full_name,code),' +
   'is_second_operator,start_hours,end_hours,total_moto_hours,start_km,end_km,total_km,start_time,end_time,' +
   'lunch_hours,total_person_hours,commute_hours,commute_route,travel_hours,travel_route,transport_hours,' +
@@ -130,7 +135,7 @@ Deno.serve(async (req: Request) => {
 
   const from = url.searchParams.get('from');
   const to = url.searchParams.get('to');
-  const objectId = url.searchParams.get('object_id');
+  const objectCode = url.searchParams.get('object_code');
   if (!isDate(from) || !isDate(to) || from! > to!) {
     await log(400, null, 'bad period');
     return json(400, { error: 'bad_period', message: 'Потрібні from і to у форматі РРРР-ММ-ДД, from ≤ to' });
@@ -140,9 +145,25 @@ Deno.serve(async (req: Request) => {
     await log(400, null, `period ${days} days`);
     return json(400, { error: 'period_too_long', message: `Період — не більше ${MAX_DAYS} днів за запит` });
   }
-  if (objectId !== null && !/^[A-Za-z]+-\d+$/.test(objectId)) {
-    await log(400, null, 'bad object_id');
-    return json(400, { error: 'bad_object_id', message: 'object_id у форматі OBJ-001' });
+  if (objectCode !== null && !/^[0-9A-Za-zА-Яа-яІіЇїЄєҐґ._\/-]{1,50}$/.test(objectCode)) {
+    await log(400, null, 'bad object_code');
+    return json(400, { error: 'bad_object_code', message: 'object_code — "Код / номер" об\'єкта (до 50 символів)' });
+  }
+
+  // Код об'єкта → внутрішні номери (код теоретично може повторюватись)
+  let objectIds: string[] | null = null;
+  if (objectCode) {
+    const { data: objs, error: objErr } = await admin.from('objects').select('id').eq('code', objectCode);
+    if (objErr) {
+      console.error('export-1c: objects', objErr.message);
+      await log(500, null, 'db error: ' + objErr.message);
+      return json(500, { error: 'db_error' });
+    }
+    objectIds = (objs || []).map((o: Row) => o.id);
+    if (objectIds.length === 0) {
+      await log(200, 0, 'object_code не знайдено');
+      return json(200, { from, to, object_code: objectCode, status: STATUS_FINAL, count: 0, generated_at: new Date().toISOString(), reports: [] });
+    }
   }
 
   let q = admin.from('daily_reports').select(SELECT)
@@ -152,7 +173,7 @@ Deno.serve(async (req: Request) => {
     .order('work_date', { ascending: true })
     .order('id', { ascending: true })
     .limit(10000);
-  if (objectId) q = q.eq('object_id', objectId);
+  if (objectIds) q = q.in('object_id', objectIds);
 
   const { data, error } = await q;
   if (error) {
@@ -166,7 +187,7 @@ Deno.serve(async (req: Request) => {
   return json(200, {
     from,
     to,
-    object_id: objectId,
+    object_code: objectCode,
     status: STATUS_FINAL,
     count: reports.length,
     generated_at: new Date().toISOString(),
