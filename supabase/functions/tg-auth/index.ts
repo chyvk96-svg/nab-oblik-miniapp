@@ -120,7 +120,7 @@ Deno.serve(async (req: Request) => {
   // 2) Білий список — так само, як router.js: перший запис з цим telegram_id
   const { data: rows, error: usersErr } = await admin
     .from('users')
-    .select('id,full_name,role,status')
+    .select('id,full_name,role,status,is_owner') // is_owner — з 2026-10-20 (👑 власник)
     .eq('telegram_id', check.telegramId)
     .limit(1);
   const tgId = check.telegramId;
