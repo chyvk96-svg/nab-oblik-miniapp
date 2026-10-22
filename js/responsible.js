@@ -4,7 +4,7 @@
 // працюють для нього через ці самі функції, що й для Відповідального.
 
 function roleSubtitle(user) {
-  return `${user.role}: ${user.full_name}`;
+  return `${escHtml(user.role)}: ${escHtml(user.full_name)}`;
 }
 
 function goToRoleHome(user) {
@@ -727,38 +727,38 @@ async function deleteObjectCompletely(user, objectId, btn) {
 
 function reportDetailsHtml(r) {
   const breakdownLine = r.has_breakdown
-    ? `<div class="detail-row"><span class="label">Поломка:</span> ${r.breakdown_description || '—'}</div>`
+    ? `<div class="detail-row"><span class="label">Поломка:</span> ${escHtml(r.breakdown_description || '—')}</div>`
     : '';
   const repairLine = (r.has_breakdown && r.repair_hours && r.repair_hours > 0)
     ? `<div class="detail-row"><span class="label">Час ремонту:</span> ${r.repair_hours} год</div>`
     : '';
   const startNoteLine = r.start_hours_note
-    ? `<div class="detail-row"><span class="label">Причина розбіжності мотогодин:</span> ${r.start_hours_note}</div>`
+    ? `<div class="detail-row"><span class="label">Причина розбіжності мотогодин:</span> ${escHtml(r.start_hours_note)}</div>`
     : '';
   const downtimeLine = (r.downtime_hours && r.downtime_hours > 0)
-    ? `<div class="detail-row"><span class="label">Простій:</span> ${r.downtime_hours} год — ${r.downtime_reason || '—'}</div>`
+    ? `<div class="detail-row"><span class="label">Простій:</span> ${r.downtime_hours} год — ${escHtml(r.downtime_reason || '—')}</div>`
     : '';
   const commuteLine = (r.commute_hours && r.commute_hours > 0)
-    ? `<div class="detail-row"><span class="label">Дорога на роботу і назад:</span> ${r.commute_hours} год${r.commute_route ? ' — ' + r.commute_route : ''}</div>`
+    ? `<div class="detail-row"><span class="label">Дорога на роботу і назад:</span> ${r.commute_hours} год${r.commute_route ? ' — ' + escHtml(r.commute_route) : ''}</div>`
     : '';
   // Перебазування: з годинами — оператор їхав разом із технікою;
   // лише маршрут — техніку забрав трал без оператора (2026-10-02)
   const travelLine = (r.travel_hours && r.travel_hours > 0)
-    ? `<div class="detail-row"><span class="label">Перебазування техніки:</span> ${r.travel_hours} год${r.travel_route ? ' — ' + r.travel_route : ''}</div>`
+    ? `<div class="detail-row"><span class="label">Перебазування техніки:</span> ${r.travel_hours} год${r.travel_route ? ' — ' + escHtml(r.travel_route) : ''}</div>`
     : (r.travel_route && String(r.travel_route).trim()
-      ? `<div class="detail-row"><span class="label">Перебазування техніки (трал, без оператора):</span> ${r.travel_route}</div>`
+      ? `<div class="detail-row"><span class="label">Перебазування техніки (трал, без оператора):</span> ${escHtml(r.travel_route)}</div>`
       : '');
   const transportLine = r.transported_people
-    ? `<div class="detail-row"><span class="label">Перевезення людей:</span> ${r.transport_hours || '—'} год${r.transport_route ? ' — ' + r.transport_route : ''}</div>`
+    ? `<div class="detail-row"><span class="label">Перевезення людей:</span> ${r.transport_hours || '—'} год${r.transport_route ? ' — ' + escHtml(r.transport_route) : ''}</div>`
     : '';
   const fuelingLine = (r.fueling_liters && r.fueling_liters > 0)
-    ? `<div class="detail-row"><span class="label">Заправка:</span> ${r.fueling_liters} л${r.fueling_source ? ' — ' + r.fueling_source : ''}</div>`
+    ? `<div class="detail-row"><span class="label">Заправка:</span> ${r.fueling_liters} л${r.fueling_source ? ' — ' + escHtml(r.fueling_source) : ''}</div>`
     : '';
   const noteLine = r.operator_note
-    ? `<div class="detail-row"><span class="label">Примітка:</span> ${r.operator_note}</div>`
+    ? `<div class="detail-row"><span class="label">Примітка:</span> ${escHtml(r.operator_note)}</div>`
     : '';
   const customerLine = r.customer_name
-    ? `<div class="detail-row"><span class="label">Замовник:</span> ${r.customer_name}</div>`
+    ? `<div class="detail-row"><span class="label">Замовник:</span> ${escHtml(r.customer_name)}</div>`
     : '';
   // Час фінального підтвердження — показується лише для вже закритих звітів
   const closedLine = r.final_closed_at
@@ -780,8 +780,8 @@ function reportDetailsHtml(r) {
     : '';
 
   return `
-    <div class="operator-name">${r.users?.full_name || '—'}</div>
-    <div class="meta">${r.equipment?.name || '—'} · ${r.objects?.name || '—'}</div>
+    <div class="operator-name">${escHtml(r.users?.full_name || '—')}</div>
+    <div class="meta">${escHtml(r.equipment?.name || '—')} · ${escHtml(r.objects?.name || '—')}</div>
     ${secondOperatorLine}
     ${customerLine}
     ${hoursLine}

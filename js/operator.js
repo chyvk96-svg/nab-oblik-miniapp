@@ -160,7 +160,7 @@ async function renderMyReports(user) {
       ${r.status === 'Повернено на коригування'
         ? `<div class="discrepancy-box" style="margin-top:10px">
              <div class="flag">⚠ ПРИЧИНА ПОВЕРНЕННЯ НА КОРИГУВАННЯ</div>
-             ${rejectionComments[r.id] || 'Причину не вказано.'}
+             ${rejectionComments[r.id] ? escHtml(rejectionComments[r.id]) : 'Причину не вказано.'}
            </div>
            <button class="btn-confirm" style="margin-top:10px" data-edit-id="${r.id}">Редагувати</button>`
         : ''}
@@ -985,7 +985,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         <div class="discrepancy-box hidden" id="discrepancy-box">
           <div class="flag">⚠ ЗНАЧЕННЯ ВІДРІЗНЯЄТЬСЯ ВІД ОЧІКУВАНОГО</div>
           <label style="margin-top:0">Причина розбіжності</label>
-          <textarea id="start_hours_note" placeholder="Наприклад: лічильник скинуто, попередній запис невірний тощо">${prefill && prefill.start_hours_note ? prefill.start_hours_note : ''}</textarea>
+          <textarea id="start_hours_note" placeholder="Наприклад: лічильник скинуто, попередній запис невірний тощо">${prefill && prefill.start_hours_note ? escHtml(prefill.start_hours_note) : ''}</textarea>
         </div>
       </div>
 
@@ -1085,7 +1085,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         <label>Заправка, л</label>
         <input type="number" step="0.1" id="fueling_liters" value="${prefill ? (prefill.fueling_liters || 0) : '0'}">
         <label>Звідки заправились</label>
-        <input type="text" id="fueling_source" placeholder="Наша заправна станція / з іншої техніки / каністри тощо" value="${prefill && prefill.fueling_source ? prefill.fueling_source : ''}">
+        <input type="text" id="fueling_source" placeholder="Наша заправна станція / з іншої техніки / каністри тощо" value="${prefill && prefill.fueling_source ? escHtml(prefill.fueling_source) : ''}">
         <div class="hint-inline hidden" id="second-operator-fuel-hint">👥 Заправку вносить хтось один з вас — не дублюй, якщо її вже вказав інший оператор.</div>
 
         <div class="checkbox-row">
@@ -1095,7 +1095,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
 
         <div id="repair-block" class="${prefill && prefill.has_breakdown ? '' : 'hidden'}">
           <label>Опис поломки</label>
-          <textarea id="breakdown_description" placeholder="Що сталось, який вузол/компонент">${prefill && prefill.breakdown_description ? prefill.breakdown_description : ''}</textarea>
+          <textarea id="breakdown_description" placeholder="Що сталось, який вузол/компонент">${prefill && prefill.breakdown_description ? escHtml(prefill.breakdown_description) : ''}</textarea>
           <label>Ремонт, год</label>
           <input type="number" step="0.1" id="repair_hours" value="${prefill ? (prefill.repair_hours || 0) : '0'}">
           <div class="hint-inline">Ремонт понад 0,5 год віднімається від роботи на об'єкті й рахується окремо.</div>
@@ -1104,7 +1104,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
 
       <div class="section">
         <div class="section-title"><span class="n">7</span><span class="icon">📝</span>Примітка</div>
-        <textarea id="operator_note" placeholder="Довільний коментар до звіту">${prefill && prefill.operator_note ? prefill.operator_note : ''}</textarea>
+        <textarea id="operator_note" placeholder="Довільний коментар до звіту">${prefill && prefill.operator_note ? escHtml(prefill.operator_note) : ''}</textarea>
       </div>
 
       <button type="submit" id="submit-btn">Перевірити звіт</button>
