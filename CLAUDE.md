@@ -258,7 +258,9 @@ supabase/functions/export-1c/ — Edge Function для 1С (з 20.10): лише 
   замовники (`renderCustomersList`, `renderAddCustomer`,
   `renderEditCustomer`), спільні (з 14.10, використовує й `responsible.js`):
   `codeValue` ("Код / номер": порожньо → NULL), `parseEdrpou`,
-  `edrpouDuplicateError`, `customerSaveErrorText`.
+  `edrpouDuplicateError`, `customerSaveErrorText`; 👑 лише власнику (з 22.10):
+  `ownerDeleteSectionHtml` + `wireOwnerDelete` (→ `nab_delete_unused`), «⛔ Заблокувати
+  негайно» в `renderEditUser`.
 - **Пошук у списках довідників** (`utils.js`, з 14.10): `listSearchHtml(key,
   placeholder)` над списком + `wireListSearch(key, listEl)` після рендеру;
   картка має `data-search="${searchAttr(...поля)}"`.
@@ -579,8 +581,8 @@ Make (MCP) — давай користувачу покрокові інстру
    ✅ **Крок Б** — телефони/Telegram ID лише адмінам (код `985cf97` + база, 22.10).
    **Лишилось (порядок):** ✅ секрет у вебхуках Make і ✅ приватні сховища (22.10); (3) власник кроки 5–6 (UI
    "🗑 Видалити назавжди", приховати роль "Адміністратор" для не-власника,
-   "⛔ Заблокувати негайно"); (4) перевірка `escHtml` у старих екранах;
-   (5) токен Wialon у Make → з'єднання.
+   "⛔ Заблокувати негайно") — ✅ 22.10; (4) ✅ `escHtml` (22.10);
+   (5) ⏸ токен Wialon у Make — пауза (рішення користувача 22.10).
 2. 🔌 **1С:** з 22.10 `ONEC_API_TOKEN` — власний токен користувача (значення
    знає лише він; тестовий більше не діє); колонки уточнить (тоді прибрати
    зайві в `toOut`).
