@@ -112,12 +112,16 @@ async function supaGet(table, query) {
   return res.json();
 }
 
-async function supaInsert(table, data) {
+// (з 2026-10-22) opts.returnRows = false — база не повертає записаний рядок
+// (return=minimal), функція повертає null. Потрібно для таблиць із закритими
+// колонками (users: телефон / Telegram ID / примітка; approvals: telegram_id) —
+// інакше база відмовить у записі, бо повернути рядок цілком не можна.
+async function supaInsert(table, data, { returnRows = true } = {}) {
   const res = await supaFetch(`${SUPABASE_URL}/rest/v1/${table}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Prefer': 'return=representation'
+      'Prefer': returnRows ? 'return=representation' : 'return=minimal'
     },
     body: JSON.stringify(data)
   });
@@ -125,15 +129,15 @@ async function supaInsert(table, data) {
     const errText = await res.text();
     throw new Error(`Помилка запису в ${table}: ${errText}`);
   }
-  return res.json();
+  return returnRows ? res.json() : null;
 }
 
-async function supaUpdate(table, filterQuery, data) {
+async function supaUpdate(table, filterQuery, data, { returnRows = true } = {}) {
   const res = await supaFetch(`${SUPABASE_URL}/rest/v1/${table}?${filterQuery}`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
-      'Prefer': 'return=representation'
+      'Prefer': returnRows ? 'return=representation' : 'return=minimal'
     },
     body: JSON.stringify(data)
   });
@@ -141,7 +145,7 @@ async function supaUpdate(table, filterQuery, data) {
     const errText = await res.text();
     throw new Error(`Помилка оновлення ${table}: ${errText}`);
   }
-  return res.json();
+  return returnRows ? res.json() : null;
 }
 
 async function supaDelete(table, filterQuery) {

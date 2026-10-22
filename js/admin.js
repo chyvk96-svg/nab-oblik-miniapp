@@ -475,7 +475,7 @@ async function renderAddUser(user, prefill = null) {
         status: 'Активний',
         code: codeValue(document.getElementById('new_user_code').value),
         note: note || null
-      });
+      }, { returnRows: false });
 
       for (const equipmentId of selectedEquipment) {
         const ueId = await supaRpc('next_id', { p_prefix: 'UE' });

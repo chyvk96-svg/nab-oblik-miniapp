@@ -895,7 +895,7 @@ async function confirmReport(user, reportId, equipmentId, endHours, endKm, btn) 
       telegram_id: tg.initDataUnsafe?.user?.id || null,
       confirmation_code: confirmationCode,
       status: 'Записано'
-    });
+    }, { returnRows: false });
 
     // Підтвердження відповідальним (або адміністратором для приватних об'єктів)
     // тепер є фінальним кроком: одразу закриваємо звіт і оновлюємо
@@ -941,7 +941,7 @@ async function rejectReport(user, reportId, btn) {
       telegram_id: tg.initDataUnsafe?.user?.id || null,
       comment: comment,
       status: 'Записано'
-    });
+    }, { returnRows: false });
 
     await supaUpdate('daily_reports', `id=eq.${reportId}`, {
       status: 'Повернено на коригування'

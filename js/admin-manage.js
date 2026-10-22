@@ -26,7 +26,8 @@ async function renderUserList(user) {
 
   let usersList;
   try {
-    usersList = await supaGet('users', `select=id,full_name,role,phone,telegram_id,status,code&order=status.asc,full_name.asc`);
+    // (з 2026-10-22) телефон і Telegram ID — лише через функцію бази для адміна
+    usersList = await supaRpc('nab_admin_users', { p_user_id: null });
   } catch (e) {
     listEl.textContent = 'Помилка завантаження: ' + e.message;
     return;
@@ -66,7 +67,7 @@ async function renderUserList(user) {
       btn.disabled = true;
       btn.textContent = 'Оновлення...';
       try {
-        await supaUpdate('users', `id=eq.${btn.dataset.toggleUser}`, { status: newStatus });
+        await supaUpdate('users', `id=eq.${btn.dataset.toggleUser}`, { status: newStatus }, { returnRows: false });
         renderUserList(user);
       } catch (e) {
         alert('Помилка: ' + e.message);
@@ -91,7 +92,7 @@ async function renderEditUser(user, targetUserId) {
 
   let targetUser, rolesList;
   try {
-    const rows = await supaGet('users', `id=eq.${targetUserId}&select=id,full_name,role,phone,telegram_id,status,note,code`);
+    const rows = await supaRpc('nab_admin_users', { p_user_id: targetUserId });
     targetUser = rows && rows[0];
     rolesList = await supaGet('roles', `status=eq.Активна&select=name&order=name.asc`);
   } catch (e) {
@@ -182,7 +183,7 @@ async function renderEditUser(user, targetUserId) {
         role: role,
         code: codeValue(document.getElementById('edit_user_code').value),
         note: note || null
-      });
+      }, { returnRows: false });
       renderUserList(user);
     } catch (err) {
       errorBox.textContent = err.message;
