@@ -63,7 +63,7 @@ async function loadDraftsBanner(user) {
       <div class="flag">📝 НЕЗАВЕРШЕНІ ЧЕРНЕТКИ (${drafts.length})</div>
       ${drafts.map(d => `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px">
-          <span>${formatDateUA(d.work_date)} · ${d.equipment?.name || '—'}</span>
+          <span>${formatDateUA(d.work_date)} · ${escHtml(d.equipment?.name || '—')}</span>
           <span style="display:flex;gap:6px">
             <button class="btn-confirm" style="padding:6px 10px" data-continue-id="${d.id}">Продовжити</button>
             <button class="btn-reject" style="padding:6px 10px" data-delete-id="${d.id}">Видалити</button>
@@ -153,7 +153,7 @@ async function renderMyReports(user) {
     <div class="report-card">
       <div class="top-row">
         <span class="date">${formatDateUA(r.work_date)}</span>
-        <span class="status-chip ${statusChipClass(r.status)}">${r.status}</span>
+        <span class="status-chip ${statusChipClass(r.status)}">${escHtml(r.status)}</span>
       </div>
       ${reportDetailsHtml(r)}
       ${adminEditsHtml(adminEdits[r.id])}
@@ -908,10 +908,10 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   };
 
   const equipmentOptions = myEquipment
-    .map(ue => `<option value="${ue.equipment.id}"${prefill && prefill.equipment_id === ue.equipment.id ? ' selected' : ''}>${ue.equipment.name}</option>`)
+    .map(ue => `<option value="${ue.equipment.id}"${prefill && prefill.equipment_id === ue.equipment.id ? ' selected' : ''}>${escHtml(ue.equipment.name)}</option>`)
     .join('');
   const objectOptions = objects
-    .map(o => `<option value="${o.id}"${prefill && prefill.object_id === o.id ? ' selected' : ''}>${o.name}</option>`)
+    .map(o => `<option value="${o.id}"${prefill && prefill.object_id === o.id ? ' selected' : ''}>${escHtml(o.name)}</option>`)
     .join('');
 
   app.innerHTML = `
@@ -1372,7 +1372,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       );
       if (links && links.length > 0) {
         respSelect.innerHTML = links
-          .map(l => `<option value="${l.user_id}">${l.users.full_name} (${l.users.role})</option>`)
+          .map(l => `<option value="${l.user_id}">${escHtml(l.users.full_name)} (${escHtml(l.users.role)})</option>`)
           .join('');
         if (prefill && prefill.responsible_id && links.some(l => l.user_id === prefill.responsible_id)) {
           respSelect.value = prefill.responsible_id;

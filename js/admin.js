@@ -401,7 +401,7 @@ async function renderAddUser(user, prefill = null) {
 
         <label>Роль</label>
         <select id="new_user_role" required>
-          ${rolesList.map(r => `<option value="${r.name}">${r.name}</option>`).join('')}
+          ${rolesList.map(r => `<option value="${escHtml(r.name)}">${escHtml(r.name)}</option>`).join('')}
         </select>
 
         <label>Примітка</label>
@@ -414,7 +414,7 @@ async function renderAddUser(user, prefill = null) {
         ${equipmentList.map(eq => `
           <div class="checkbox-row">
             <input type="checkbox" class="equipment-check" value="${eq.id}" id="eq-${eq.id}">
-            <label for="eq-${eq.id}">${eq.name}</label>
+            <label for="eq-${eq.id}">${escHtml(eq.name)}</label>
           </div>
         `).join('')}
       </div>
@@ -548,7 +548,7 @@ function adminReportCardHtml(r, user, duplicates, edits) {
     <div class="report-card" data-report-card="${r.id}">
       <div class="top-row">
         <span class="date">${formatDateUA(r.work_date)} · ${r.id}</span>
-        <span class="status-chip ${statusChipClass(r.status)}">${r.status}</span>
+        <span class="status-chip ${statusChipClass(r.status)}">${escHtml(r.status)}</span>
       </div>
       ${dups ? `<div class="discrepancy-box" style="margin:6px 0 8px;padding:6px 10px"><div class="flag" style="margin:0">⚠ СХОЖЕ НА ДУБЛЬ: ${dups.join(', ')}</div></div>` : ''}
       ${reportDetailsHtml(r)}
@@ -732,7 +732,7 @@ async function renderAdminClosedReports(user, filters) {
     });
     const objs = Array.from(objMap.entries()).sort((a, b) => a[1].name.localeCompare(b[1].name, 'uk'));
     objSel.innerHTML = `<option value="">Усі об'єкти (${inDay.length})</option>` +
-      objs.map(([id, o]) => `<option value="${id}">${o.name} (${o.n})</option>`).join('');
+      objs.map(([id, o]) => `<option value="${id}">${escHtml(o.name)} (${o.n})</option>`).join('');
     objSel.value = objMap.has(preferred) ? preferred : '';
   }
 
@@ -1032,7 +1032,7 @@ async function toggleWialonDaily(btn, from, to) {
   try {
     days = await supaRpc('wialon_equipment_daily', { p_equipment_id: equipmentId, p_from: from, p_to: to });
   } catch (e) {
-    box.innerHTML = `<div class="meta" style="margin-top:8px">Помилка: ${e.message}</div>`;
+    box.innerHTML = `<div class="meta" style="margin-top:8px">Помилка: ${escHtml(e.message)}</div>`;
     return;
   }
 

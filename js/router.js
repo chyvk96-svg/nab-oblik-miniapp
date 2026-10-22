@@ -92,7 +92,7 @@ async function main() {
   } else if (currentUser.role === 'Обліковець') {
     renderAccountantHome(currentUser);
   } else {
-    renderMessage(`Роль "${currentUser.role}" поки не реалізована в цій версії Mini App. Скоро буде.`);
+    renderMessage(`Роль "${escHtml(currentUser.role)}" поки не реалізована в цій версії Mini App. Скоро буде.`);
   }
 }
 

@@ -163,7 +163,7 @@ async function renderAddObject(user) {
 
         <label>Замовник</label>
         <select id="object_customer_id" required>
-          ${customersList.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
+          ${customersList.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('')}
           <option value="__new__">+ Новий замовник...</option>
         </select>
         <input type="text" id="object_new_customer_name" class="hidden" placeholder="Назва нового замовника" style="margin-top:8px">
@@ -171,7 +171,7 @@ async function renderAddObject(user) {
 
         <label>Відповідальний за об'єкт</label>
         <select id="object_responsible_id" required>
-          ${respUsers.map(u => `<option value="${u.id}">${u.full_name} (${u.role})</option>`).join('')}
+          ${respUsers.map(u => `<option value="${u.id}">${escHtml(u.full_name)} (${escHtml(u.role)})</option>`).join('')}
         </select>
       </div>
 
@@ -355,10 +355,10 @@ async function renderManageObjects(user) {
   listEl.innerHTML = objectsList.map(o => `
     <div class="report-card" id="obj-${o.id}" data-search="${searchAttr(o.name, o.short_name, o.code, o.customers?.name, o.customers?.edrpou, o.status)}">
       <div class="top-row">
-        <span class="date">${o.name}</span>
-        <span class="status-chip ${objectStatusChipClass(o.status)}">${o.status}</span>
+        <span class="date">${escHtml(o.name)}</span>
+        <span class="status-chip ${objectStatusChipClass(o.status)}">${escHtml(o.status)}</span>
       </div>
-      <div class="meta">Замовник: ${o.customers?.name || '—'}${o.code ? ` · код: ${escHtml(o.code)}` : ''}</div>
+      <div class="meta">Замовник: ${escHtml(o.customers?.name || '—')}${o.code ? ` · код: ${escHtml(o.code)}` : ''}</div>
       <div class="item-actions">
         <button class="btn-confirm" data-edit-object="${o.id}" style="min-width:0; padding:10px 4px">Редагувати</button>
         ${objectStatusActions(o.status).map(([newStatus, label]) => `
@@ -459,17 +459,17 @@ async function renderEditObject(user, objectId) {
         <div class="section-title"><span class="n">1</span><span class="icon">🏗️</span>Дані об'єкта</div>
 
         <label>Назва об'єкта</label>
-        <input type="text" id="edit_object_name" required value="${objectRow.name}">
+        <input type="text" id="edit_object_name" required value="${escHtml(objectRow.name)}">
 
         <label>Скорочена назва</label>
-        <input type="text" id="edit_object_short_name" value="${objectRow.short_name || ''}">
+        <input type="text" id="edit_object_short_name" value="${escHtml(objectRow.short_name || '')}">
 
         <label>Код / номер об'єкта</label>
         <input type="text" id="edit_object_code" value="${escHtml(objectRow.code || '')}" placeholder="Необов'язково">
 
         <label>Замовник</label>
         <select id="edit_object_customer_id" required>
-          ${customersList.map(c => `<option value="${c.id}" ${c.id === objectRow.customer_id ? 'selected' : ''}>${c.name}</option>`).join('')}
+          ${customersList.map(c => `<option value="${c.id}" ${c.id === objectRow.customer_id ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('')}
         </select>
 
         <label>Дата початку</label>
@@ -490,8 +490,8 @@ async function renderEditObject(user, objectId) {
         ${activeResponsible.length === 0 ? '<div class="hint-inline">Ще нікого не призначено.</div>' : ''}
         ${activeResponsible.map(r => `
           <div class="checkbox-row" style="justify-content:space-between">
-            <label style="margin:0">${r.users?.full_name || '—'} (${r.users?.role || '—'})</label>
-            <button type="button" class="btn-reject" style="flex:none;padding:8px 12px" data-toggle-resp="${r.id}" data-current-status="${r.status}">
+            <label style="margin:0">${escHtml(r.users?.full_name || '—')} (${escHtml(r.users?.role || '—')})</label>
+            <button type="button" class="btn-reject" style="flex:none;padding:8px 12px" data-toggle-resp="${r.id}" data-current-status="${escHtml(r.status)}">
               Зняти
             </button>
           </div>
@@ -501,7 +501,7 @@ async function renderEditObject(user, objectId) {
       ${availableToAdd.length > 0 ? `
         <label style="margin-top:18px">Додати відповідального</label>
         <select id="add-responsible-select">
-          ${availableToAdd.map(u => `<option value="${u.id}">${u.full_name} (${u.role})</option>`).join('')}
+          ${availableToAdd.map(u => `<option value="${u.id}">${escHtml(u.full_name)} (${escHtml(u.role)})</option>`).join('')}
         </select>
         <button type="button" class="btn-add-top" id="btn-add-responsible" style="margin-top:10px">+ Додати</button>
       ` : ''}
@@ -511,9 +511,9 @@ async function renderEditObject(user, objectId) {
         <div id="inactive-responsible-list" class="hidden">
           ${inactiveResponsible.map(r => `
             <div class="checkbox-row" style="justify-content:space-between">
-              <label style="margin:0">${r.users?.full_name || '—'} (${r.users?.role || '—'})</label>
+              <label style="margin:0">${escHtml(r.users?.full_name || '—')} (${escHtml(r.users?.role || '—')})</label>
               <div style="display:flex;gap:8px;flex:none">
-                <button type="button" class="btn-confirm" style="flex:none;padding:8px 12px" data-toggle-resp="${r.id}" data-current-status="${r.status}">Повернути</button>
+                <button type="button" class="btn-confirm" style="flex:none;padding:8px 12px" data-toggle-resp="${r.id}" data-current-status="${escHtml(r.status)}">Повернути</button>
                 <button type="button" class="btn-reject" style="flex:none;padding:8px 12px" data-delete-resp="${r.id}">Видалити</button>
               </div>
             </div>
@@ -843,7 +843,7 @@ async function renderPendingApprovals(user) {
     <div class="report-card" id="card-${r.id}">
       <div class="top-row">
         <span class="date">${formatDateUA(r.work_date)}</span>
-        <span class="status-chip ${statusChipClass(r.status)}">${r.status}</span>
+        <span class="status-chip ${statusChipClass(r.status)}">${escHtml(r.status)}</span>
       </div>
       ${reportDetailsHtml(r)}
       <div class="approval-actions">
@@ -990,7 +990,7 @@ async function renderApprovalHistory(user) {
     <div class="report-card">
       <div class="top-row">
         <span class="date">${formatDateUA(r.work_date)}</span>
-        <span class="status-chip ${statusChipClass(r.status)}">${r.status}</span>
+        <span class="status-chip ${statusChipClass(r.status)}">${escHtml(r.status)}</span>
       </div>
       ${reportDetailsHtml(r)}
     </div>

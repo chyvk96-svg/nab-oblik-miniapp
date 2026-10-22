@@ -42,13 +42,13 @@ async function renderUserList(user) {
   listEl.innerHTML = usersList.map(u => `
     <div class="report-card" data-search="${searchAttr(u.full_name, u.code, u.phone, u.role, u.telegram_id, u.status)}">
       <div class="top-row">
-        <span class="date">${u.full_name}</span>
-        <span class="status-chip ${u.status === 'Активний' ? 'status-final' : 'status-corr'}">${u.status}</span>
+        <span class="date">${escHtml(u.full_name)}</span>
+        <span class="status-chip ${u.status === 'Активний' ? 'status-final' : 'status-corr'}">${escHtml(u.status)}</span>
       </div>
-      <div class="meta">${u.role} · тел: ${u.phone || '—'} · TG ID: ${u.telegram_id}${u.code ? ` · код: ${escHtml(u.code)}` : ''}</div>
+      <div class="meta">${escHtml(u.role)} · тел: ${escHtml(u.phone || '—')} · TG ID: ${escHtml(u.telegram_id)}${u.code ? ` · код: ${escHtml(u.code)}` : ''}</div>
       <div class="item-actions">
         <button type="button" class="btn-confirm" data-edit-user="${u.id}">Редагувати</button>
-        <button type="button" class="btn-reject" data-toggle-user="${u.id}" data-current-status="${u.status}">
+        <button type="button" class="btn-reject" data-toggle-user="${u.id}" data-current-status="${escHtml(u.status)}">
           ${u.status === 'Активний' ? 'Деактивувати' : 'Активувати'}
         </button>
       </div>
@@ -115,7 +115,7 @@ async function renderEditUser(user, targetUserId) {
         <div class="section-title"><span class="n">1</span><span class="icon">👤</span>Дані користувача</div>
 
         <label>ПІБ</label>
-        <input type="text" id="edit_user_name" required value="${targetUser.full_name}">
+        <input type="text" id="edit_user_name" required value="${escHtml(targetUser.full_name)}">
 
         <label>Код / номер</label>
         <input type="text" id="edit_user_code" value="${escHtml(targetUser.code || '')}" placeholder="Необов'язково">
@@ -124,15 +124,15 @@ async function renderEditUser(user, targetUserId) {
         <input type="number" id="edit_user_telegram_id" required value="${targetUser.telegram_id}">
 
         <label>Телефон</label>
-        <input type="text" id="edit_user_phone" value="${targetUser.phone || ''}">
+        <input type="text" id="edit_user_phone" value="${escHtml(targetUser.phone || '')}">
 
         <label>Роль</label>
         <select id="edit_user_role" required>
-          ${rolesList.map(r => `<option value="${r.name}" ${r.name === targetUser.role ? 'selected' : ''}>${r.name}</option>`).join('')}
+          ${rolesList.map(r => `<option value="${escHtml(r.name)}" ${r.name === targetUser.role ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
         </select>
 
         <label>Примітка</label>
-        <textarea id="edit_user_note">${targetUser.note || ''}</textarea>
+        <textarea id="edit_user_note">${escHtml(targetUser.note || '')}</textarea>
       </div>
 
       <button type="submit" id="edit-user-submit-btn">Зберегти зміни</button>
@@ -291,14 +291,14 @@ async function renderEquipmentList(user) {
   listEl.innerHTML = equipmentList.map(eq => `
     <div class="report-card" data-search="${searchAttr(eq.name, eq.brand_model, eq.reg_number, eq.code, eq.wialon_unit_id, eq.status)}">
       <div class="top-row">
-        <span class="date">${eq.name}</span>
-        <span class="status-chip ${eq.status === 'Активна' ? 'status-final' : 'status-corr'}">${eq.status}</span>
+        <span class="date">${escHtml(eq.name)}</span>
+        <span class="status-chip ${eq.status === 'Активна' ? 'status-final' : 'status-corr'}">${escHtml(eq.status)}</span>
       </div>
-      <div class="meta">${eq.brand_model || '—'} · номер: ${eq.reg_number || '—'}${eq.code ? ` · код: ${escHtml(eq.code)}` : ''}${eq.tracks_moto_hours === false ? ' · без мотогодин' : ''}${eq.tracks_odometer ? ' · спідометр' : ''}${eq.allows_two_operators ? ' · 👥 2 оператори' : ''}</div>
-      <div class="meta">Wialon: ${eq.wialon_unit_id ? eq.wialon_unit_id : 'не прив\'язано'}</div>
+      <div class="meta">${escHtml(eq.brand_model || '—')} · номер: ${escHtml(eq.reg_number || '—')}${eq.code ? ` · код: ${escHtml(eq.code)}` : ''}${eq.tracks_moto_hours === false ? ' · без мотогодин' : ''}${eq.tracks_odometer ? ' · спідометр' : ''}${eq.allows_two_operators ? ' · 👥 2 оператори' : ''}</div>
+      <div class="meta">Wialon: ${eq.wialon_unit_id ? escHtml(eq.wialon_unit_id) : 'не прив\'язано'}</div>
       <div class="item-actions">
         <button type="button" class="btn-confirm" data-edit-eq="${eq.id}">Редагувати</button>
-        <button type="button" class="btn-reject" data-toggle-eq="${eq.id}" data-current-status="${eq.status}">
+        <button type="button" class="btn-reject" data-toggle-eq="${eq.id}" data-current-status="${escHtml(eq.status)}">
           ${eq.status === 'Активна' ? 'Деактивувати' : 'Активувати'}
         </button>
       </div>
@@ -501,19 +501,19 @@ async function renderEditEquipment(user, equipmentId) {
         <div class="section-title"><span class="n">1</span><span class="icon">🚜</span>Дані техніки</div>
 
         <label>Назва</label>
-        <input type="text" id="edit_eq_name" required value="${eq.name}">
+        <input type="text" id="edit_eq_name" required value="${escHtml(eq.name)}">
 
         <label>Марка/модель</label>
-        <input type="text" id="edit_eq_brand_model" value="${eq.brand_model || ''}">
+        <input type="text" id="edit_eq_brand_model" value="${escHtml(eq.brand_model || '')}">
 
         <label>Держ./інвентарний номер</label>
-        <input type="text" id="edit_eq_reg_number" value="${eq.reg_number || ''}">
+        <input type="text" id="edit_eq_reg_number" value="${escHtml(eq.reg_number || '')}">
 
         <label>Код / номер</label>
         <input type="text" id="edit_eq_code" value="${escHtml(eq.code || '')}" placeholder="Необов'язково">
 
         <label>ID у Wialon</label>
-        <input type="text" id="edit_eq_wialon_unit_id" inputmode="numeric" value="${eq.wialon_unit_id || ''}" placeholder="Необов'язково, напр. 23952736">
+        <input type="text" id="edit_eq_wialon_unit_id" inputmode="numeric" value="${escHtml(eq.wialon_unit_id || '')}" placeholder="Необов'язково, напр. 23952736">
         <div class="hint-inline">Номер цієї техніки в системі Wialon (GPS-трекер) — потрібен для автоматичної звірки звітів. Залиш порожнім, якщо трекера немає.</div>
 
         <div class="checkbox-row">
@@ -547,7 +547,7 @@ async function renderEditEquipment(user, equipmentId) {
         <div class="hint-inline">Лише для асфальтоукладача й фрези. Тоді у звіті на цій техніці зʼявиться галочка «Я другий оператор»: другий оператор подає свій звіт з годинами, а мотогодини й спідометр веде лише основний.</div>
 
         <label>Примітка</label>
-        <textarea id="edit_eq_note">${eq.note || ''}</textarea>
+        <textarea id="edit_eq_note">${escHtml(eq.note || '')}</textarea>
       </div>
 
       <button type="submit" id="edit-eq-submit-btn">Зберегти зміни</button>
@@ -677,7 +677,7 @@ async function renderUserEquipment(user, targetUserId) {
 
   bodyEl.className = '';
   bodyEl.innerHTML = `
-    <div class="section-title" style="margin:0 0 4px"><span class="icon">🚜</span>${targetUser.full_name}</div>
+    <div class="section-title" style="margin:0 0 4px"><span class="icon">🚜</span>${escHtml(targetUser.full_name)}</div>
     <div class="hint-inline" style="margin-bottom:8px">Познач техніку, яка закріплена за цим оператором зараз.</div>
     <form id="user-equipment-form">
       ${equipmentList.map(eq => {
@@ -686,7 +686,7 @@ async function renderUserEquipment(user, targetUserId) {
         return `
           <div class="checkbox-row">
             <input type="checkbox" class="ue-check" value="${eq.id}" id="ue-${eq.id}" ${checked ? 'checked' : ''}>
-            <label for="ue-${eq.id}">${eq.name}</label>
+            <label for="ue-${eq.id}">${escHtml(eq.name)}</label>
           </div>
         `;
       }).join('')}
@@ -775,14 +775,14 @@ async function renderCustomersList(user) {
   listEl.innerHTML = customersList.map(c => `
     <div class="report-card" data-search="${searchAttr(c.name, c.edrpou, c.note, c.status)}">
       <div class="top-row">
-        <span class="date">${c.name}</span>
-        <span class="status-chip ${c.status === 'Активний' ? 'status-final' : 'status-corr'}">${c.status}</span>
+        <span class="date">${escHtml(c.name)}</span>
+        <span class="status-chip ${c.status === 'Активний' ? 'status-final' : 'status-corr'}">${escHtml(c.status)}</span>
       </div>
       <div class="meta">ЄДРПОУ: ${c.edrpou ? escHtml(c.edrpou) : 'не вказано'}</div>
-      ${c.note ? `<div class="meta">${c.note}</div>` : ''}
+      ${c.note ? `<div class="meta">${escHtml(c.note)}</div>` : ''}
       <div class="item-actions">
         <button type="button" class="btn-confirm" data-edit-cst="${c.id}">Редагувати</button>
-        <button type="button" class="btn-reject" data-toggle-cst="${c.id}" data-current-status="${c.status}">
+        <button type="button" class="btn-reject" data-toggle-cst="${c.id}" data-current-status="${escHtml(c.status)}">
           ${c.status === 'Активний' ? 'Деактивувати' : 'Активувати'}
         </button>
       </div>
@@ -928,13 +928,13 @@ async function renderEditCustomer(user, customerId) {
         <div class="section-title"><span class="n">1</span><span class="icon">🏢</span>Дані замовника</div>
 
         <label>Назва</label>
-        <input type="text" id="edit_cst_name" required value="${cst.name}">
+        <input type="text" id="edit_cst_name" required value="${escHtml(cst.name)}">
 
         <label>ЄДРПОУ</label>
         <input type="text" id="edit_cst_edrpou" inputmode="numeric" maxlength="12" value="${escHtml(cst.edrpou || '')}" placeholder="Необов'язково: 8 цифр, для ФОП — 10">
 
         <label>Примітка</label>
-        <textarea id="edit_cst_note">${cst.note || ''}</textarea>
+        <textarea id="edit_cst_note">${escHtml(cst.note || '')}</textarea>
       </div>
 
       <button type="submit" id="edit-cst-submit-btn">Зберегти зміни</button>
