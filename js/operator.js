@@ -827,6 +827,7 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   let reportFormEl = null;   // саме ця форма (а не будь-яка з id report-form)
 
   let myEquipment, objects;
+  let travelObjects = [];   // (з 2026-10-22) об'єкти для маршруту перебазування
 
   try {
     if (adminCtx) {
@@ -838,7 +839,8 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         .map(e => ({ equipment_id: e.id, equipment: e }));
       // Об'єкти — так само: лише активні + об'єкт самого звіту, навіть якщо
       // його вже деактивовано чи закрито (з 2026-10-12; раніше показувались усі)
-      const allObj = await supaGet('objects', `select=id,name,customer_id,customers(name),status&order=name.asc`);
+      const allObj = await supaGet('objects', `select=id,name,short_name,is_base,customer_id,customers(name),status&order=name.asc`);
+      travelObjects = (allObj || []).filter(o => o.status === 'Активний');
       objects = (allObj || [])
         .filter(o => o.status === 'Активний' || (existingReport && o.id === existingReport.object_id))
         .map(o => (o.status === 'Активний'
@@ -849,7 +851,16 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         'user_equipment',
         `user_id=eq.${user.id}&status=eq.Активна&select=equipment_id,equipment(id,name,confirmed_hours,tracks_moto_hours,confirmed_km,tracks_odometer,allows_two_operators)`
       );
-      objects = await supaGet('objects', `status=eq.Активний&select=id,name,customer_id,customers(name)`);
+      objects = await supaGet('objects', `status=eq.Активний&select=id,name,short_name,is_base,customer_id,customers(name)`);
+      travelObjects = objects || [];
+    }
+    // Точки маршруту зі звіту/чернетки, яких уже немає серед активних
+    // (об'єкт закрили) — підтягуємо окремо, щоб не загубити
+    const missingTravelIds = ((prefill && prefill.travel_object_ids) || [])
+      .filter(id => id && !travelObjects.some(o => o.id === id));
+    if (missingTravelIds.length) {
+      const extra = await supaGet('objects', `id=in.(${Array.from(new Set(missingTravelIds)).join(',')})&select=id,name,short_name,is_base,status`);
+      travelObjects = travelObjects.concat(extra || []);
     }
   } catch (e) {
     renderMessage('Помилка завантаження довідників: ' + e.message);
@@ -913,6 +924,27 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
   const objectOptions = objects
     .map(o => `<option value="${o.id}"${prefill && prefill.object_id === o.id ? ' selected' : ''}>${escHtml(o.name)}</option>`)
     .join('');
+
+  // ---------- Перебазування: точки маршруту (з 2026-10-22) ----------
+  // Кожна точка — об'єкт зі списку (бази з позначкою "Місце виїзду" —
+  // першими). У звіт іде travel_object_ids (ID по порядку, для 1С) і текст
+  // travel_route з коротких назв "Автобаза → Кричка-Росільна" — його далі
+  // читають картки, Excel, Make і "Де техніка". Старі звіти з маршрутом,
+  // вписаним вручну, лишаються як були, доки точки не оберуть зі списку.
+  const travelLabel = o => (o.short_name && o.short_name.trim()) || o.name;
+  const travelObjMap = {};
+  travelObjects.forEach(o => { travelObjMap[o.id] = o; });
+  const travelSorted = travelObjects.slice().sort((a, b) =>
+    (a.is_base === b.is_base ? 0 : (a.is_base ? -1 : 1)) ||
+    travelLabel(a).localeCompare(travelLabel(b), 'uk'));
+  const travelDefaultBase = (travelSorted.find(o => o.is_base && o.status !== 'Закритий' && o.status !== 'Неактивний') || {}).id || '';
+  const TRAVEL_MAX_POINTS = 4;   // звідки + до 2 проміжних + куди
+  const travelLegacyRoute = (prefill && !(prefill.travel_object_ids || []).length && hasText(prefill.travel_route))
+    ? String(prefill.travel_route).trim() : null;
+  let travelPoints = (prefill && (prefill.travel_object_ids || []).length)
+    ? prefill.travel_object_ids.slice()
+    : (travelLegacyRoute ? ['', ''] : []);
+  while (travelPoints.length === 1) travelPoints.push('');
 
   app.innerHTML = `
     ${topbarHtml(
@@ -1053,9 +1085,14 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
 
         <div class="extra-block hidden" id="travel-block">
           <div class="extra-title">🚗 Перебазування техніки</div>
-          <label>Маршрут</label>
-          <input type="text" id="travel_route" placeholder="Звідки → куди" value="${prefill && prefill.travel_route ? escHtml(prefill.travel_route) : ''}">
-          <div class="hint-inline">Пиши «звідки → куди», назву місця — як у списку об'єктів. За маршрутом адміністратор бачить, де зараз техніка.</div>
+          <div id="travel-points"></div>
+          <div class="travel-actions">
+            <button type="button" class="travel-btn" id="travel-add-point">+ Проміжна точка</button>
+            <button type="button" class="travel-btn" id="travel-swap">⇅ Поміняти</button>
+          </div>
+          <div class="travel-route-preview hidden" id="travel-route-preview"></div>
+          ${travelLegacyRoute ? `<div class="hint-inline" id="travel-legacy-hint">Раніше вписано вручну: «${escHtml(travelLegacyRoute)}». Обери точки зі списку або залиш як є.</div>` : ''}
+          <div class="hint-inline">Обери зі списку, звідки й куди перевезли техніку. Немає потрібного місця — попроси відповідального додати об'єкт. За маршрутом адміністратор бачить, де зараз техніка.</div>
           <label>Години (якщо їхав разом із технікою)</label>
           <input type="number" step="0.1" id="travel_hours" value="${prefill && prefill.travel_hours ? prefill.travel_hours : ''}">
           <div class="hint-inline">Техніку забрав трал без тебе — години не вказуй, лише маршрут. Якщо їхав разом із технікою — вкажи години, вони рахуються окремо від роботи на об'єкті.</div>
@@ -1161,12 +1198,105 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       syncExtraBlocks();
       box.dispatchEvent(new Event('change', { bubbles: true })); // → автозбереження
       if (box.checked) {
-        const firstInput = document.querySelector(`#${EXTRA_BLOCKS[chip.dataset.extra]} input`);
+        const firstInput = document.querySelector(`#${EXTRA_BLOCKS[chip.dataset.extra]}`).querySelector('select, input');
         if (firstInput) firstInput.focus();
       }
     });
   });
   syncExtraBlocks();
+
+  // ---------- Перебазування: вибір точок маршруту ----------
+  const travelPointsEl = document.getElementById('travel-points');
+
+  function travelOptionsHtml(selectedId) {
+    const opt = o => `<option value="${o.id}"${o.id === selectedId ? ' selected' : ''}>${escHtml(travelLabel(o))}${o.status && o.status !== 'Активний' ? ' — ' + escHtml(String(o.status).toLowerCase()) : ''}</option>`;
+    const bases = travelSorted.filter(o => o.is_base);
+    const others = travelSorted.filter(o => !o.is_base);
+    return `<option value="">— обери —</option>` +
+      (bases.length ? `<optgroup label="Місця виїзду">${bases.map(opt).join('')}</optgroup>` : '') +
+      (others.length ? `<optgroup label="Об'єкти">${others.map(opt).join('')}</optgroup>` : '');
+  }
+
+  // Текст маршруту з обраних точок: "Автобаза → Кричка-Росільна → Автобаза"
+  function travelRouteText(ids) {
+    return ids.filter(Boolean).map(id => travelObjMap[id] ? travelLabel(travelObjMap[id]) : id).join(' → ');
+  }
+
+  function renderTravelPoints() {
+    const last = travelPoints.length - 1;
+    travelPointsEl.innerHTML = travelPoints.map((id, i) => `
+      ${i > 0 ? '<div class="travel-arrow">↓</div>' : ''}
+      <div class="travel-point-label">${i === 0 ? 'Звідки' : (i === last ? 'Куди' : 'Через')}</div>
+      <div class="travel-point-row">
+        <select data-travel-idx="${i}">${travelOptionsHtml(id)}</select>
+        ${i > 0 && i < last ? `<button type="button" class="travel-remove" data-travel-remove="${i}" aria-label="Прибрати точку">✕</button>` : ''}
+      </div>
+    `).join('');
+    document.getElementById('travel-add-point').classList.toggle('hidden', travelPoints.length >= TRAVEL_MAX_POINTS);
+    const preview = document.getElementById('travel-route-preview');
+    const chosen = travelPoints.filter(Boolean);
+    preview.textContent = chosen.length >= 2 ? travelRouteText(travelPoints) : '';
+    preview.classList.toggle('hidden', chosen.length < 2);
+  }
+
+  // Зміна точок кнопками — сповістити форму, щоб спрацювало автозбереження
+  function travelChanged() {
+    renderTravelPoints();
+    travelPointsEl.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  // Увімкнули "Перебазування" вперше — "Звідки" = база, "Куди" = об'єкт звіту
+  function ensureDefaultTravelPoints() {
+    if (travelPoints.length) return;
+    const objectId = document.getElementById('object_id').value;
+    const to = travelObjMap[objectId] && objectId !== travelDefaultBase ? objectId : '';
+    travelPoints = [travelDefaultBase, to];
+  }
+
+  travelPointsEl.addEventListener('change', (e) => {
+    const idx = e.target.dataset && e.target.dataset.travelIdx;
+    if (idx === undefined) return;
+    travelPoints[Number(idx)] = e.target.value;
+    renderTravelPoints();
+  });
+  travelPointsEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-travel-remove]');
+    if (!btn) return;
+    travelPoints.splice(Number(btn.dataset.travelRemove), 1);
+    travelChanged();
+  });
+  document.getElementById('travel-add-point').addEventListener('click', () => {
+    if (travelPoints.length >= TRAVEL_MAX_POINTS) return;
+    travelPoints.splice(travelPoints.length - 1, 0, '');
+    travelChanged();
+  });
+  document.getElementById('travel-swap').addEventListener('click', () => {
+    travelPoints.reverse();
+    travelChanged();
+  });
+  document.getElementById('has_travel').addEventListener('change', (e) => {
+    if (e.target.checked) {
+      ensureDefaultTravelPoints();
+      renderTravelPoints();
+    }
+  });
+  if (document.getElementById('has_travel').checked) ensureDefaultTravelPoints();
+  renderTravelPoints();
+
+  // Результат для звіту: { ids, route } або { error }. Порожні точки при
+  // старому маршруті, вписаному вручну, — лишаємо той текст.
+  function travelResult() {
+    if (travelPoints.every(id => !id) && travelLegacyRoute) return { ids: null, route: travelLegacyRoute };
+    if (travelPoints.length < 2 || travelPoints.some(id => !id)) {
+      return { error: 'Обери всі точки маршруту перебазування зі списку (зайву проміжну точку прибери ✕) або вимкни кнопку «Перебазування».' };
+    }
+    for (let i = 1; i < travelPoints.length; i++) {
+      if (travelPoints[i] === travelPoints[i - 1]) {
+        return { error: 'Дві сусідні точки маршруту перебазування однакові — перевір «Звідки» і «Куди».' };
+      }
+    }
+    return { ids: travelPoints.slice(), route: travelRouteText(travelPoints) };
+  }
 
   // Підказка і автопідстановка початкових мотогодин при виборі техніки
   function applySuggestedStartHours() {
@@ -1465,7 +1595,9 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       commute_hours: hasCommute ? (num('commute_hours') || 0) : 0,
       commute_route: hasCommute ? txt('commute_route') : null,
       travel_hours: hasTravel ? (num('travel_hours') || 0) : 0,
-      travel_route: hasTravel ? txt('travel_route') : null,
+      // У чернетку — те, що вже обрано (без перевірки повноти)
+      travel_object_ids: hasTravel && travelPoints.some(Boolean) ? travelPoints.filter(Boolean) : null,
+      travel_route: hasTravel ? (travelPoints.some(Boolean) ? travelRouteText(travelPoints) : travelLegacyRoute) : null,
       transported_people: transportedPeople,
       transport_route: transportedPeople ? txt('transport_route') : null,
       transport_hours: transportedPeople ? num('transport_hours') : null,
@@ -1620,8 +1752,9 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
       // Перебазування: маршрут обов'язковий, години — лише якщо оператор їхав
       // разом із технікою (трал без оператора = 0 год, 2026-10-02)
       const hasTravel = document.getElementById('has_travel').checked;
-      if (hasTravel && !document.getElementById('travel_route').value.trim()) {
-        throw new Error('Вкажи маршрут перебазування «звідки → куди» (або вимкни кнопку «Перебазування»).');
+      const travel = hasTravel ? travelResult() : { ids: null, route: null };
+      if (travel.error) {
+        throw new Error(travel.error);
       }
       if (hasTravel && (parseFloat(document.getElementById('travel_hours').value) || 0) < 0) {
         throw new Error('Години перебазування не можуть бути від\'ємними.');
@@ -1681,7 +1814,8 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         commute_hours: commuteHours,
         commute_route: hasCommute ? commuteRoute : null,
         travel_hours: travelHours,
-        travel_route: hasTravel ? (document.getElementById('travel_route').value.trim() || null) : null,
+        travel_route: travel.route || null,
+        travel_object_ids: travel.ids,
         transported_people: transportedPeople,
         transport_route: transportedPeople ? transportRoute : null,
         transport_hours: transportedPeople ? transportHours : null,
