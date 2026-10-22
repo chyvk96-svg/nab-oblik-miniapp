@@ -53,10 +53,16 @@ async function loadDraftsBanner(user) {
       `operator_id=eq.${user.id}&status=eq.Чернетка&select=id,work_date,equipment_id,equipment(name)&order=work_date.desc`
     );
   } catch (e) {
-    return; // індикатор не критичний — тихо пропускаємо помилку
+    wrap.innerHTML = '';   // індикатор не критичний — тихо пропускаємо помилку, але без застарілих кнопок
+    return;
   }
 
-  if (!drafts || drafts.length === 0) return;
+  // (з 2026-10-22) Видалили останню чернетку — прибрати банер, інакше на
+  // екрані лишалась кнопка "Видалення..." і здавалось, що все зависло
+  if (!drafts || drafts.length === 0) {
+    wrap.innerHTML = '';
+    return;
+  }
 
   wrap.innerHTML = `
     <div class="discrepancy-box" style="margin:0 0 14px">
