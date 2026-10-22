@@ -401,7 +401,7 @@ async function renderAddUser(user, prefill = null) {
 
         <label>Роль</label>
         <select id="new_user_role" required>
-          ${rolesList.map(r => `<option value="${escHtml(r.name)}">${escHtml(r.name)}</option>`).join('')}
+          ${rolesList.filter(r => user.is_owner || r.name !== 'Адміністратор').map(r => `<option value="${escHtml(r.name)}">${escHtml(r.name)}</option>`).join('')}
         </select>
 
         <label>Примітка</label>

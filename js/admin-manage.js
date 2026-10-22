@@ -46,12 +46,15 @@ async function renderUserList(user) {
         <span class="status-chip ${u.status === 'Активний' ? 'status-final' : 'status-corr'}">${escHtml(u.status)}</span>
       </div>
       <div class="meta">${escHtml(u.role)} · тел: ${escHtml(u.phone || '—')} · TG ID: ${escHtml(u.telegram_id)}${u.code ? ` · код: ${escHtml(u.code)}` : ''}</div>
+      ${u.role === 'Адміністратор' && !user.is_owner ? `
+      <div class="hint-inline">👑 Адміністраторами керує лише власник системи</div>
+      ` : `
       <div class="item-actions">
         <button type="button" class="btn-confirm" data-edit-user="${u.id}">Редагувати</button>
         <button type="button" class="btn-reject" data-toggle-user="${u.id}" data-current-status="${escHtml(u.status)}">
           ${u.status === 'Активний' ? 'Деактивувати' : 'Активувати'}
         </button>
-      </div>
+      </div>`}
     </div>
   `).join('');
   wireListSearch('users', listEl);
@@ -105,6 +108,15 @@ async function renderEditUser(user, targetUserId) {
     return;
   }
 
+  // (з 2026-10-22) Адміністраторами керує лише 👑 власник (база теж не дасть — тригер nab_protect_admins)
+  if (targetUser.role === 'Адміністратор' && !user.is_owner) {
+    bodyEl.textContent = 'Адміністраторами керує лише власник системи.';
+    return;
+  }
+  const roleOptions = user.is_owner ? rolesList : rolesList.filter(r => r.name !== 'Адміністратор');
+  // Блокувати й видаляти — лише власник, і не себе
+  const ownerActions = user.is_owner && targetUser.id !== user.id;
+
   // Водій — лише позначка, у Mini App працює як Оператор (має закріплену техніку)
   const worksAsOperator = targetUser.role === 'Оператор' || targetUser.role === 'Водій';
 
@@ -128,7 +140,7 @@ async function renderEditUser(user, targetUserId) {
 
         <label>Роль</label>
         <select id="edit_user_role" required>
-          ${rolesList.map(r => `<option value="${escHtml(r.name)}" ${r.name === targetUser.role ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
+          ${roleOptions.map(r => `<option value="${escHtml(r.name)}" ${r.name === targetUser.role ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
         </select>
 
         <label>Примітка</label>
@@ -141,11 +153,38 @@ async function renderEditUser(user, targetUserId) {
     ${worksAsOperator ? `
       <button type="button" class="btn-add-top" id="btn-go-user-equipment" style="margin-top:18px">🚜 Керувати технікою цього оператора</button>
     ` : ''}
+    ${ownerActions && targetUser.status === 'Активний' ? `
+      <div class="section" style="margin-top:18px">
+        <div class="section-title"><span class="icon">⛔</span>Заблокувати</div>
+        <div class="hint-inline">👑 Лише власник. Доступ до Mini App зникне з наступної дії людини (за кілька секунд). Розблокувати — «Активувати» у списку користувачів.</div>
+        <button type="button" class="btn-reject" id="btn-owner-block" style="width:100%;margin-top:12px;padding:12px">⛔ Заблокувати негайно</button>
+      </div>
+    ` : ''}
+    ${ownerActions ? ownerDeleteSectionHtml(user, 'користувача') : ''}
   `;
 
   if (worksAsOperator) {
     document.getElementById('btn-go-user-equipment').addEventListener('click', () => renderUserEquipment(user, targetUserId));
   }
+
+  const blockBtn = document.getElementById('btn-owner-block');
+  if (blockBtn) {
+    blockBtn.addEventListener('click', async () => {
+      if (!confirm(`Заблокувати «${targetUser.full_name}» негайно?\n\nДоступ до Mini App зникне за кілька секунд. Розблокувати можна кнопкою «Активувати» у списку користувачів.`)) return;
+      blockBtn.disabled = true;
+      blockBtn.textContent = 'Блокування...';
+      try {
+        await supaUpdate('users', `id=eq.${targetUserId}`, { status: 'Неактивний' }, { returnRows: false });
+        alert(`«${targetUser.full_name}» заблоковано.`);
+        renderUserList(user);
+      } catch (e) {
+        alert('Помилка: ' + e.message);
+        blockBtn.disabled = false;
+        blockBtn.textContent = '⛔ Заблокувати негайно';
+      }
+    });
+  }
+  if (ownerActions) wireOwnerDelete('users', targetUserId, targetUser.full_name, () => renderUserList(user));
 
   const form = document.getElementById('edit-user-form');
   const submitBtn = document.getElementById('edit-user-submit-btn');
@@ -215,6 +254,59 @@ function parseWialonUnitId(raw) {
 function codeValue(raw) {
   const v = (raw || '').trim();
   return v === '' ? null : v;
+}
+
+// ---------- 👑 Лише власник (з 2026-10-22): видалити назавжди невикористаний запис ----------
+// Блок із кнопкою для картки довідника; не власнику — порожньо. Базу захищає
+// nab_delete_unused (лише власник, лише невикористане) — кнопка лише зручність.
+function ownerDeleteSectionHtml(user, what) {
+  if (!user.is_owner) return '';
+  return `
+    <div class="section" style="margin-top:18px">
+      <div class="section-title"><span class="icon">🗑</span>Видалення назавжди</div>
+      <div class="hint-inline">👑 Лише власник. Лише для випадково створених записів, які ніде не використовуються (немає звітів тощо) — інакше деактивуй. Дію не можна скасувати.</div>
+      <button type="button" class="btn-reject" id="btn-owner-delete" style="width:100%;margin-top:12px;padding:12px">🗑 Видалити ${what} назавжди</button>
+    </div>
+  `;
+}
+
+// Пробний запуск → що заважає / що видалиться разом → підтвердження → видалення.
+// table: 'users' / 'equipment' / 'customers'
+function wireOwnerDelete(table, id, name, onDone) {
+  const btn = document.getElementById('btn-owner-delete');
+  if (!btn) return;
+  const listText = obj => Object.entries(obj || {}).map(([k, n]) => `• ${k}: ${n}`).join('\n');
+  btn.addEventListener('click', async () => {
+    const originalLabel = btn.textContent;
+    const restore = () => { btn.disabled = false; btn.textContent = originalLabel; };
+    btn.disabled = true;
+    btn.textContent = 'Перевірка...';
+    try {
+      const check = await supaRpc('nab_delete_unused', { p_table: table, p_id: id, p_dry_run: true });
+      if (!check.ok) {
+        alert(`«${name}» видалити не можна — запис уже використовується:\n${listText(check.blockers)}\n\nДеактивуй його замість видалення.`);
+        restore();
+        return;
+      }
+      const along = listText(check.along);
+      if (!confirm(`Видалити «${name}» назавжди?${along ? `\n\nРазом буде видалено:\n${along}` : ''}\n\nДію не можна скасувати.`)) {
+        restore();
+        return;
+      }
+      btn.textContent = 'Видалення...';
+      const result = await supaRpc('nab_delete_unused', { p_table: table, p_id: id, p_dry_run: false });
+      if (!result.ok) {
+        alert(`«${name}» не видалено — з'явилось використання:\n${listText(result.blockers)}`);
+        restore();
+        return;
+      }
+      alert(`«${name}» видалено.`);
+      onDone();
+    } catch (e) {
+      alert('Помилка: ' + e.message);
+      restore();
+    }
+  });
 }
 
 // ЄДРПОУ замовника (з 2026-10-14): 8 цифр (підприємство) або 10 (ІПН ФОП).
@@ -553,7 +645,9 @@ async function renderEditEquipment(user, equipmentId) {
       <button type="submit" id="edit-eq-submit-btn">Зберегти зміни</button>
       <div class="error-text hidden" id="edit-eq-error-box"></div>
     </form>
+    ${ownerDeleteSectionHtml(user, 'техніку')}
   `;
+  wireOwnerDelete('equipment', equipmentId, eq.name, () => renderEquipmentList(user));
 
   const form = document.getElementById('edit-eq-form');
   const submitBtn = document.getElementById('edit-eq-submit-btn');
@@ -940,7 +1034,9 @@ async function renderEditCustomer(user, customerId) {
       <button type="submit" id="edit-cst-submit-btn">Зберегти зміни</button>
       <div class="error-text hidden" id="edit-cst-error-box"></div>
     </form>
+    ${ownerDeleteSectionHtml(user, 'замовника')}
   `;
+  wireOwnerDelete('customers', customerId, cst.name, () => renderCustomersList(user));
 
   const form = document.getElementById('edit-cst-form');
   const submitBtn = document.getElementById('edit-cst-submit-btn');
