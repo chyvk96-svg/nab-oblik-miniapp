@@ -146,6 +146,13 @@ async function renderAddObject(user) {
 
         <label>Скорочена назва</label>
         <input type="text" id="object_short_name" placeholder="Необов'язково">
+        <div class="hint-inline">Коротко, як кажуть на виробництві (напр. «Автобаза», «Кричка-Росільна») — так об'єкт видно в маршруті перебазування.</div>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="object_is_base">
+          <label for="object_is_base">Місце виїзду техніки</label>
+        </div>
+        <div class="hint-inline">Автобаза, кар'єр, бетонний — звідки техніка виїжджає й куди повертається. Такі об'єкти — першими в маршруті перебазування.</div>
 
         <label>Код / номер об'єкта</label>
         <input type="text" id="object_code" placeholder="Необов'язково">
@@ -238,6 +245,7 @@ async function renderAddObject(user) {
         id: objectId,
         name: name,
         short_name: shortName || null,
+        is_base: document.getElementById('object_is_base').checked,
         code: codeValue(document.getElementById('object_code').value),
         start_date: startDate || null,
         customer_id: customerId,
@@ -326,7 +334,7 @@ async function renderManageObjects(user) {
   try {
     objectsList = await supaGet(
       'objects',
-      `select=id,name,short_name,code,status,customers(name,edrpou)&order=name.asc`
+      `select=id,name,short_name,is_base,code,status,customers(name,edrpou)&order=name.asc`
     );
   } catch (e) {
     listEl.textContent = 'Помилка завантаження: ' + e.message;
@@ -354,6 +362,7 @@ async function renderManageObjects(user) {
         <span class="status-chip ${objectStatusChipClass(o.status)}">${escHtml(o.status)}</span>
       </div>
       <div class="meta">Замовник: ${escHtml(o.customers?.name || '—')}${o.code ? ` · код: ${escHtml(o.code)}` : ''}</div>
+      ${o.short_name || o.is_base ? `<div class="meta">${o.is_base ? '🚩 Місце виїзду' : ''}${o.is_base && o.short_name ? ' · ' : ''}${o.short_name ? 'коротко: ' + escHtml(o.short_name) : ''}</div>` : ''}
       <div class="item-actions">
         <button class="btn-confirm" data-edit-object="${o.id}" style="min-width:0; padding:10px 4px">Редагувати</button>
         ${objectStatusActions(o.status).map(([newStatus, label]) => `
@@ -415,7 +424,7 @@ async function renderEditObject(user, objectId) {
 
   let objectRow, customersList, respCandidates, currentResponsible;
   try {
-    const rows = await supaGet('objects', `id=eq.${objectId}&select=id,name,short_name,code,customer_id,start_date,end_date`);
+    const rows = await supaGet('objects', `id=eq.${objectId}&select=id,name,short_name,is_base,code,customer_id,start_date,end_date`);
     objectRow = rows && rows[0];
     customersList = await supaGet('customers', `status=eq.Активний&select=id,name&order=name.asc`);
     respCandidates = await supaGet(
@@ -458,6 +467,13 @@ async function renderEditObject(user, objectId) {
 
         <label>Скорочена назва</label>
         <input type="text" id="edit_object_short_name" value="${escHtml(objectRow.short_name || '')}">
+        <div class="hint-inline">Коротко, як кажуть на виробництві (напр. «Автобаза», «Кричка-Росільна») — так об'єкт видно в маршруті перебазування.</div>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="edit_object_is_base"${objectRow.is_base ? ' checked' : ''}>
+          <label for="edit_object_is_base">Місце виїзду техніки</label>
+        </div>
+        <div class="hint-inline">Автобаза, кар'єр, бетонний — звідки техніка виїжджає й куди повертається. Такі об'єкти — першими в маршруті перебазування.</div>
 
         <label>Код / номер об'єкта</label>
         <input type="text" id="edit_object_code" value="${escHtml(objectRow.code || '')}" placeholder="Необов'язково">
@@ -553,6 +569,7 @@ async function renderEditObject(user, objectId) {
       await supaUpdate('objects', `id=eq.${objectId}`, {
         name: name,
         short_name: shortName || null,
+        is_base: document.getElementById('edit_object_is_base').checked,
         code: codeValue(document.getElementById('edit_object_code').value),
         customer_id: customerId,
         start_date: startDate || null,
