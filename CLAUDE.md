@@ -321,6 +321,14 @@ supabase/functions/export-1c/ — Edge Function для 1С (з 20.10): лише 
   incidents, maintenance, wialon_check, id_counters — лише адмін; довідники —
   усім. **Новий екран, що читає чужі звіти/службові таблиці, — перевір правила**
   (RLS не дає помилки, просто поверне порожньо).
+- **Контакти (з 2026-10-22):** Mini App читає `users` лише (id, full_name, role,
+  status, created_at, code, is_owner); phone, telegram_id, note — лише адмін через
+  `supaRpc('nab_admin_users', { p_user_id })`. `approvals.telegram_id` — не
+  читається. Тому запис у `users` / `approvals` — **лише з `{ returnRows: false }`**
+  (`supaInsert(t, data, { returnRows: false })`, `supaUpdate(t, f, data, { returnRows: false })`),
+  і **ніколи `select=*` з users**. **Нова колонка в users/approvals** — окремий
+  `grant select (колонка) on … to authenticated`, інакше Mini App її не побачить.
+  TRUNCATE для authenticated відібрано.
 - **Перевірити як користувач** (сухий прогін, без змін): у транзакції
   `set_config('request.jwt.claims', '{"role":"authenticated","app_metadata":{"nab_user_id":"USR-…"}}', true)`
   + `set local role authenticated`, у кінці `raise exception` з результатами —
@@ -558,7 +566,8 @@ Make (MCP) — давай користувачу покрокові інстру
    **21.10 вранці** — перевірити перші реальні звіти, Make (🆕/✅, нагадування,
    Wialon), `errors`, записи в журналі.
    ✅ **22.10 права за ролями — ЗАПИС** і **ЧИТАННЯ крок А** (⏳ перевірка в Telegram).
-   **Лишилось (порядок):** (1) крок Б — телефони/Telegram ID лише адмінам (код); (2) секрет у вебхуках Make + закрити публічні кошики
+   ✅ **Крок Б** — телефони/Telegram ID лише адмінам (код `985cf97` + база, 22.10).
+   **Лишилось (порядок):** (2) секрет у вебхуках Make + закрити публічні кошики
    storage (обидва — Make, за погодженням); (3) власник кроки 5–6 (UI
    "🗑 Видалити назавжди", приховати роль "Адміністратор" для не-власника,
    "⛔ Заблокувати негайно"); (4) перевірка `escHtml` у старих екранах;
