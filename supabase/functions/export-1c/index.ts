@@ -37,7 +37,9 @@ function envKey(newName: string, legacyName: string): string {
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SECRET_KEY = envKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY');
-const API_TOKEN = Deno.env.get('ONEC_API_TOKEN') || '';
+// (з 2026-10-22) trim: при копіюванні в Supabase / 1С легко захопити пробіл чи
+// перенос рядка — порівнюємо ключ без них (сам ключ має збігатися повністю)
+const API_TOKEN = (Deno.env.get('ONEC_API_TOKEN') || '').trim();
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -128,8 +130,10 @@ Deno.serve(async (req: Request) => {
     }
   };
 
-  if (!safeEqual(req.headers.get('x-api-key') || '', API_TOKEN)) {
-    await log(401, null, 'неправильний або відсутній X-Api-Key');
+  const gotKey = (req.headers.get('x-api-key') || '').trim();
+  if (!safeEqual(gotKey, API_TOKEN)) {
+    // Лише довжини (не значення) — щоб власник у журналі бачив, чи ключ хоч схожий
+    await log(401, null, `неправильний або відсутній X-Api-Key (довжина: отримано ${gotKey.length}, очікується ${API_TOKEN.length})`);
     return json(401, { error: 'unauthorized', message: 'Неправильний або відсутній X-Api-Key' });
   }
 
