@@ -16,6 +16,10 @@
 // знає лише користувач і програміст 1С. Це НЕ publishable key і НЕ ключ Make:
 // замінити токен можна будь-коли, нічого іншого не зачіпаючи.
 // Кожне звернення (і невдале) пишеться в api_access_log — видно в "📜 Журнал".
+// (з 2026-10-22) travel_points — точки маршруту перебазування по порядку:
+// код 1С і повна назва об'єкта (оператор обирає їх зі списку об'єктів).
+// Старі звіти з маршрутом, вписаним вручну, — порожній список; текст
+// маршруту, як і раніше, у travel_route.
 // Розгортання — з --no-verify-jwt (1С не має пропуску Supabase).
 
 import { createClient } from 'npm:@supabase/supabase-js@2.49.4';
@@ -62,7 +66,19 @@ const time5 = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 5) : null
 // deno-lint-ignore no-explicit-any
 type Row = any;
 
-function toOut(r: Row) {
+// Об'єкти точок маршруту: ID → { code, name }
+type TravelObj = { code: string | null; name: string | null };
+
+function travelPointsOut(ids: unknown, travelObjs: Map<string, TravelObj>) {
+  if (!Array.isArray(ids)) return [];
+  return ids.filter(Boolean).map((id: string, i: number) => ({
+    order: i + 1,
+    code: travelObjs.get(id)?.code ?? null,
+    name: travelObjs.get(id)?.name ?? null,
+  }));
+}
+
+function toOut(r: Row, travelObjs: Map<string, TravelObj>) {
   const obj = r.objects || {};
   const cust = obj.customers || {};
   return {
@@ -89,6 +105,7 @@ function toOut(r: Row) {
     commute_route: r.commute_route ?? null,
     travel_hours: num(r.travel_hours),
     travel_route: r.travel_route ?? null,
+    travel_points: travelPointsOut(r.travel_object_ids, travelObjs),
     transport_hours: num(r.transport_hours),
     transport_route: r.transport_route ?? null,
     downtime_hours: num(r.downtime_hours),
@@ -106,7 +123,7 @@ const SELECT =
   'id,work_date,status,object_id,objects(name,code,customers(name,edrpou)),customer_name,' +
   'equipment_id,equipment(name,code),operator_id,operator:users!daily_reports_operator_id_fkey(full_name,code),' +
   'is_second_operator,start_hours,end_hours,total_moto_hours,start_km,end_km,total_km,start_time,end_time,' +
-  'lunch_hours,total_person_hours,commute_hours,commute_route,travel_hours,travel_route,transport_hours,' +
+  'lunch_hours,total_person_hours,commute_hours,commute_route,travel_hours,travel_route,travel_object_ids,transport_hours,' +
   'transport_route,downtime_hours,downtime_reason,fueling_liters,fueling_source,has_breakdown,' +
   'breakdown_description,repair_hours,operator_note';
 
@@ -186,7 +203,20 @@ Deno.serve(async (req: Request) => {
     return json(500, { error: 'db_error' });
   }
 
-  const reports = (data || []).map(toOut);
+  // Точки маршруту — одним запитом по всіх звітах
+  const travelIds = Array.from(new Set((data || []).flatMap((r: Row) => (Array.isArray(r.travel_object_ids) ? r.travel_object_ids : []).filter(Boolean)))) as string[];
+  const travelObjs = new Map<string, TravelObj>();
+  if (travelIds.length) {
+    const { data: tObjs, error: tErr } = await admin.from('objects').select('id,name,code').in('id', travelIds);
+    if (tErr) {
+      console.error('export-1c: travel objects', tErr.message);
+      await log(500, null, 'db error: ' + tErr.message);
+      return json(500, { error: 'db_error' });
+    }
+    (tObjs || []).forEach((o: Row) => travelObjs.set(o.id, { code: o.code ?? null, name: o.name ?? null }));
+  }
+
+  const reports = (data || []).map((r: Row) => toOut(r, travelObjs));
   await log(200, reports.length, null);
   return json(200, {
     from,

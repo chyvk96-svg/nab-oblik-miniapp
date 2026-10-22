@@ -6,7 +6,7 @@
 потрапляє в GitHub, див. розділ 12).
 
 > Актуалізовано: **2026-10-22**. Останній коміт коду на цю дату:
-> `6717c36` (22.10, export-1c). **З 20.10 у базі увімкнено RLS (з 22.10 — запис за ролями);
+> `276779e` (22.10, банер чернеток; перед ним `6ffe5d3` — маршрут перебазування зі списку). **З 20.10 у базі увімкнено RLS (з 22.10 — запис за ролями);
 > є 👑 власник системи (USR-001), журнал змін, запити доступу, канал для 1С.**
 
 ---
@@ -192,7 +192,8 @@ supabase/functions/export-1c/ — Edge Function для 1С (з 20.10): лише 
   з цим telegram_id. Сповіщення в Telegram не потрібне (рішення користувача).
 - **1С:** `export-1c` (`GET ?from&to[&object_code]`; у відповіді лише коди 1С —
   «Код / номер» об'єкта/техніки/оператора, ЄДРПОУ замовника, без OBJ-/EQ-/
-  USR-/CST-; ключ звіту `report_id`), заголовок `X-Api-Key` =
+  USR-/CST-; ключ звіту `report_id`; з 22.10 `travel_points` — точки маршруту
+  перебазування: код і повна назва об'єкта), заголовок `X-Api-Key` =
   секрет `ONEC_API_TOKEN`; не publishable і НЕ ключ Make); звернення — у
   `api_access_log` (видно в "Журнал" → "Входи"). Інструкція —
   `docs/1C_export_API.md` і `.docx`. Розгортання — як tg-auth, з копії в scratchpad.
@@ -223,7 +224,9 @@ supabase/functions/export-1c/ — Edge Function для 1С (з 20.10): лише 
   `renderMyReports`, **`renderOperatorForm(user, report, draft, draftId, adminCtx)`**
   (одна форма для оператора І для редагування адміном — гілка `adminCtx`),
   `renderReportPreview`, чернетки (`draftSaveChain`, `flushDraft`,
-  `draftTimeValue`, `timeInputValue`, `draftSaveErrorText`), захист від
+  `draftTimeValue`, `timeInputValue`, `draftSaveErrorText`), маршрут
+  перебазування зі списку об'єктів (з 22.10: `travelPoints`, `travelResult`,
+  `travelRouteText`, `TRAVEL_MAX_POINTS = 4`), захист від
   дублів (`findMatchingDraftId`, `deleteLeftoverDrafts`,
   `findSimilarSubmittedReports`, `sameReportFilter`), виправлення адміна
   (`EDIT_DIFF_FIELDS`, `fetchAdminEdits`, `adminEditsHtml`), "Мої години"
@@ -390,7 +393,9 @@ supabase/functions/export-1c/ — Edge Function для 1С (з 20.10): лише 
    - **Усього за звіт** (`reportTotalHours`) = робота + дорога +
      перебазування + перевезення + ремонт (лише якщо > 0,5).
    - Простій (`downtime_hours`) — лише для інформації, ніде не додається.
-   - Перебазування: маршрут обов'язковий; години 0/порожньо = техніку
+   - Перебазування: маршрут обов'язковий — з 22.10 лише вибір об'єктів зі
+     списку (`travel_object_ids`, бази `objects.is_base` першими; текст
+     `travel_route` з коротких назв; ручного вводу немає); години 0/порожньо = техніку
      перевіз **трал без оператора**.
    - **Другий оператор** (з 2026-10-14, лише техніка з
      `equipment.allows_two_operators` — укладач, фреза):
