@@ -329,6 +329,9 @@ supabase/functions/export-1c/ — Edge Function для 1С (з 20.10): лише 
   і **ніколи `select=*` з users**. **Нова колонка в users/approvals** — окремий
   `grant select (колонка) on … to authenticated`, інакше Mini App її не побачить.
   TRUNCATE для authenticated відібрано.
+- **Сховища (з 2026-10-22) приватні** (`exports`, `incident-media`): Mini App лише
+  завантажує в `exports`; Make 7567518 бере файл через `/storage/v1/object/exports/…`
+  із з'єднанням 11946171. Публічних посилань на файли більше немає.
 - **Перевірити як користувач** (сухий прогін, без змін): у транзакції
   `set_config('request.jwt.claims', '{"role":"authenticated","app_metadata":{"nab_user_id":"USR-…"}}', true)`
   + `set local role authenticated`, у кінці `raise exception` з результатами —
