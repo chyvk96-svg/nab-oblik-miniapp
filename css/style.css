@@ -247,6 +247,26 @@
     color: var(--ink-soft);
     margin-top: 2px;
   }
+  /* (з 2026-10-22) Заголовки розділів у меню адміна: ЩОДНЯ / ЗВІТИ / ДОВІДНИКИ */
+  .menu-section {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 18px 2px 8px;
+    font-family: 'Oswald', sans-serif;
+    font-weight: 500;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .menu-section:first-child { margin-top: 2px; }
+  .menu-section::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
   .back-link {
     display: inline-flex;
     align-items: center;

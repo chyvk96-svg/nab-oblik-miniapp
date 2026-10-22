@@ -13,12 +13,14 @@ function adminSubtitle(user) {
 }
 
 // ---------- Головне меню адміністратора ----------
+// (з 2026-10-22) Кнопки згруповано заголовками: 👑 Власник / Щодня / Звіти / Довідники.
 
 function renderAdminHome(user) {
   app.innerHTML = `
     ${topbarHtml('Головне меню', roleSubtitle(user))}
     <div class="menu-list">
       ${user.is_owner ? `
+      <div class="menu-section">👑 Власник</div>
       <button class="menu-btn" id="btn-owner-journal">
         <span class="emoji">📜</span>
         <span>
@@ -34,6 +36,7 @@ function renderAdminHome(user) {
         </span>
         ${countBadgeHtml('requests-badge', 'var(--danger)', '#fff')}
       </button>` : ''}
+      <div class="menu-section">Щодня</div>
       <button class="menu-btn" id="btn-pending">
         <span class="emoji">✅</span>
         <span>
@@ -49,6 +52,51 @@ function renderAdminHome(user) {
           <span class="sub">Уже опрацьовані мною звіти</span>
         </span>
       </button>
+      <button class="menu-btn" id="btn-pending-reports">
+        <span class="emoji">⏳</span>
+        <span>
+          Непідтверджені звіти
+          <span class="sub">По всій компанії, лише перегляд</span>
+        </span>
+        ${companyPendingBadgeHtml()}
+      </button>
+      <div class="menu-section">Звіти</div>
+      <button class="menu-btn" id="btn-closed-reports">
+        <span class="emoji">📊</span>
+        <span>
+          Усі закриті звіти
+          <span class="sub">Повний огляд по всій компанії</span>
+        </span>
+      </button>
+      <button class="menu-btn" id="btn-object-report">
+        <span class="emoji">🏗️</span>
+        <span>
+          Звіт по об'єкту
+          <span class="sub">Техніка й оператори на об'єкті за період</span>
+        </span>
+      </button>
+      <button class="menu-btn" id="btn-operator-hours">
+        <span class="emoji">🕒</span>
+        <span>
+          Години оператора
+          <span class="sub">Підтверджені години оператора / водія, відомість у Telegram</span>
+        </span>
+      </button>
+      <button class="menu-btn" id="btn-wialon-check">
+        <span class="emoji">🛰️</span>
+        <span>
+          Звірка з Wialon
+          <span class="sub">Звіти операторів проти GPS за період</span>
+        </span>
+      </button>
+      <button class="menu-btn" id="btn-equipment-location">
+        <span class="emoji">📍</span>
+        <span>
+          Де техніка
+          <span class="sub">Остання локація за звітами операторів (перебазування)</span>
+        </span>
+      </button>
+      <div class="menu-section">Довідники</div>
       <button class="menu-btn" id="btn-manage-objects">
         <span class="emoji">🗂️</span>
         <span>
@@ -75,49 +123,6 @@ function renderAdminHome(user) {
         <span>
           Замовники
           <span class="sub">Додати / редагувати / деактивувати</span>
-        </span>
-      </button>
-      <button class="menu-btn" id="btn-pending-reports">
-        <span class="emoji">⏳</span>
-        <span>
-          Непідтверджені звіти
-          <span class="sub">По всій компанії, лише перегляд</span>
-        </span>
-        ${companyPendingBadgeHtml()}
-      </button>
-      <button class="menu-btn" id="btn-closed-reports">
-        <span class="emoji">📊</span>
-        <span>
-          Усі закриті звіти
-          <span class="sub">Повний огляд по всій компанії</span>
-        </span>
-      </button>
-      <button class="menu-btn" id="btn-wialon-check">
-        <span class="emoji">🛰️</span>
-        <span>
-          Звірка з Wialon
-          <span class="sub">Звіти операторів проти GPS за період</span>
-        </span>
-      </button>
-      <button class="menu-btn" id="btn-equipment-location">
-        <span class="emoji">📍</span>
-        <span>
-          Де техніка
-          <span class="sub">Остання локація за звітами операторів (перебазування)</span>
-        </span>
-      </button>
-      <button class="menu-btn" id="btn-object-report">
-        <span class="emoji">🏗️</span>
-        <span>
-          Звіт по об'єкту
-          <span class="sub">Техніка й оператори на об'єкті за період</span>
-        </span>
-      </button>
-      <button class="menu-btn" id="btn-operator-hours">
-        <span class="emoji">🕒</span>
-        <span>
-          Години оператора
-          <span class="sub">Підтверджені години оператора / водія, відомість у Telegram</span>
         </span>
       </button>
     </div>
