@@ -36,25 +36,17 @@ function renderResponsibleHome(user) {
           <span class="sub">Уже опрацьовані звіти</span>
         </span>
       </button>
-      <button class="menu-btn" id="btn-add-object">
-        <span class="emoji">➕</span>
-        <span>
-          Додати об'єкт
-          <span class="sub">Новий об'єкт, якого ще немає в базі</span>
-        </span>
-      </button>
       <button class="menu-btn" id="btn-manage-objects">
         <span class="emoji">🗂️</span>
         <span>
           Об'єкти
-          <span class="sub">Закрити/відкрити існуючі об'єкти</span>
+          <span class="sub">Додати / редагувати / закрити-відкрити</span>
         </span>
       </button>
     </div>
   `;
   document.getElementById('btn-pending').addEventListener('click', () => renderPendingApprovals(user));
   document.getElementById('btn-history').addEventListener('click', () => renderApprovalHistory(user));
-  document.getElementById('btn-add-object').addEventListener('click', () => renderAddObject(user));
   document.getElementById('btn-manage-objects').addEventListener('click', () => renderManageObjects(user));
   loadPendingBadge(user);
 }
@@ -116,11 +108,11 @@ async function renderAddObject(user) {
   app.innerHTML = `
     ${topbarHtml("Додати об'єкт", roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
-      <div class="back-link" id="back-to-menu-add" style="margin:0 0 14px">← Назад до меню</div>
+      <div class="back-link" id="back-to-menu-add" style="margin:0 0 14px">← Назад до списку</div>
       <div id="add-object-body" class="msg">Завантаження...</div>
     </div>
   `;
-  document.getElementById('back-to-menu-add').addEventListener('click', () => goToRoleHome(user));
+  document.getElementById('back-to-menu-add').addEventListener('click', () => renderManageObjects(user));
 
   const bodyEl = document.getElementById('add-object-body');
 
@@ -266,10 +258,10 @@ async function renderAddObject(user) {
           <div>✅ Об'єкт успішно створено</div>
           <div class="stamp">${objectId}</div>
         </div>
-        <button type="button" id="back-home-btn" style="background:var(--asphalt);color:var(--brand-yellow);width:100%;padding:14px;border:none;border-radius:4px;font-family:'Oswald',sans-serif;font-weight:600;font-size:14px;text-transform:uppercase;letter-spacing:0.03em;cursor:pointer">На головну</button>
+        <button type="button" id="back-home-btn" style="background:var(--asphalt);color:var(--brand-yellow);width:100%;padding:14px;border:none;border-radius:4px;font-family:'Oswald',sans-serif;font-weight:600;font-size:14px;text-transform:uppercase;letter-spacing:0.03em;cursor:pointer">До списку об'єктів</button>
         </div>
       `;
-      document.getElementById('back-home-btn').addEventListener('click', () => goToRoleHome(user));
+      document.getElementById('back-home-btn').addEventListener('click', () => renderManageObjects(user));
     } catch (err) {
       errorBox.textContent = customerSaveErrorText(err);
       errorBox.classList.remove('hidden');
@@ -319,11 +311,14 @@ async function renderManageObjects(user) {
     ${topbarHtml("Об'єкти", roleSubtitle(user))}
     <div class="wrap" style="padding-top:14px">
       <div class="back-link" id="back-to-menu-objects" style="margin:0 0 14px">← Назад до меню</div>
+      <button type="button" class="btn-add-top" id="btn-go-add-object">+ Додати об'єкт</button>
       ${listSearchHtml('objects', 'Пошук: назва, код, замовник')}
       <div id="objects-list" class="msg">Завантаження...</div>
     </div>
   `;
   document.getElementById('back-to-menu-objects').addEventListener('click', () => goToRoleHome(user));
+  // (з 2026-10-22) додавання об'єкта — тут, як у "Користувачах" і "Техніці"
+  document.getElementById('btn-go-add-object').addEventListener('click', () => renderAddObject(user));
 
   const listEl = document.getElementById('objects-list');
 

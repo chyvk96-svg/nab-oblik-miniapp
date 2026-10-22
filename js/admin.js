@@ -49,13 +49,6 @@ function renderAdminHome(user) {
           <span class="sub">Уже опрацьовані мною звіти</span>
         </span>
       </button>
-      <button class="menu-btn" id="btn-add-object">
-        <span class="emoji">➕</span>
-        <span>
-          Додати об'єкт
-          <span class="sub">Новий об'єкт, якого ще немає в базі</span>
-        </span>
-      </button>
       <button class="menu-btn" id="btn-manage-objects">
         <span class="emoji">🗂️</span>
         <span>
@@ -137,7 +130,6 @@ function renderAdminHome(user) {
   }
   document.getElementById('btn-pending').addEventListener('click', () => renderPendingApprovals(user));
   document.getElementById('btn-history').addEventListener('click', () => renderApprovalHistory(user));
-  document.getElementById('btn-add-object').addEventListener('click', () => renderAddObject(user));
   document.getElementById('btn-manage-objects').addEventListener('click', () => renderManageObjects(user));
   document.getElementById('btn-users').addEventListener('click', () => renderUserList(user));
   document.getElementById('btn-equipment').addEventListener('click', () => renderEquipmentList(user));
