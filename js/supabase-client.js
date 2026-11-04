@@ -148,18 +148,21 @@ async function supaUpdate(table, filterQuery, data, { returnRows = true } = {}) 
   return returnRows ? res.json() : null;
 }
 
-async function supaDelete(table, filterQuery) {
+// (з 2026-11-04) opts.returnRows = false — як у supaInsert / supaUpdate: база не
+// повертає видалені рядки. Потрібно для approvals (закрита колонка telegram_id) —
+// інакше "permission denied for table approvals" і звіт-дубль не видалявся.
+async function supaDelete(table, filterQuery, { returnRows = true } = {}) {
   const res = await supaFetch(`${SUPABASE_URL}/rest/v1/${table}?${filterQuery}`, {
     method: 'DELETE',
     headers: {
-      'Prefer': 'return=representation'
+      'Prefer': returnRows ? 'return=representation' : 'return=minimal'
     }
   });
   if (!res.ok) {
     const errText = await res.text();
     throw new Error(`Помилка видалення з ${table}: ${errText}`);
   }
-  return res.json();
+  return returnRows ? res.json() : null;
 }
 
 async function supaRpc(fnName, params) {

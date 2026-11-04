@@ -609,11 +609,14 @@ function wireAdminReportActions(listEl, user, reports, reload) {
 // Видалення звіту разом із записами, що на нього посилаються
 async function deleteReportCompletely(reportId) {
   const filter = `report_id=eq.${reportId}`;
-  await supaDelete('approvals', filter);
-  await supaDelete('report_edit_log', filter);
-  await supaDelete('events', filter);
-  await supaDelete('incidents', filter);
-  await supaDelete('daily_reports', `id=eq.${reportId}`);
+  // (з 2026-11-04) без повернення рядків: approvals має закриту колонку
+  // telegram_id, і повернути видалені рядки цілком база не дозволяє
+  const quiet = { returnRows: false };
+  await supaDelete('approvals', filter, quiet);
+  await supaDelete('report_edit_log', filter, quiet);
+  await supaDelete('events', filter, quiet);
+  await supaDelete('incidents', filter, quiet);
+  await supaDelete('daily_reports', `id=eq.${reportId}`, quiet);
 }
 
 // ---------- Непідтверджені звіти по всій компанії ----------

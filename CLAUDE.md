@@ -330,7 +330,8 @@ supabase/functions/export-1c/ — Edge Function для 1С (з 20.10): лише 
   status, created_at, code, is_owner); phone, telegram_id, note — лише адмін через
   `supaRpc('nab_admin_users', { p_user_id })`. `approvals.telegram_id` — не
   читається. Тому запис у `users` / `approvals` — **лише з `{ returnRows: false }`**
-  (`supaInsert(t, data, { returnRows: false })`, `supaUpdate(t, f, data, { returnRows: false })`),
+  (`supaInsert(t, data, { returnRows: false })`, `supaUpdate(t, f, data, { returnRows: false })`,
+  з 04.11 і `supaDelete(t, f, { returnRows: false })`),
   і **ніколи `select=*` з users**. **Нова колонка в users/approvals** — окремий
   `grant select (колонка) on … to authenticated`, інакше Mini App її не побачить.
   TRUNCATE для authenticated відібрано.
