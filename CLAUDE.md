@@ -229,7 +229,9 @@ supabase/functions/export-1c/ — Edge Function для 1С (з 20.10): лише 
   `travelRouteText`, `TRAVEL_MAX_POINTS = 4`), захист від
   дублів (`findMatchingDraftId`, `deleteLeftoverDrafts`,
   `findBlockingReport` + `blockingReportText` — з 05.11 дубль НЕ подається,
-  `sameReportFilter`; банер повернених `loadReturnedBanner` / `openReportForFix`), виправлення адміна
+  `sameReportFilter`; банер повернених `loadReturnedBanner` / `openReportForFix`; з 05.11 перетин
+  часу оператора `findTimeOverlap`, сума за день `dayTotalHours` (>18 попередження, >24 блок),
+  м/г інших операторів `findOtherOperatorMotoOverlap`, м/г ≤ час + перебазування у формі), виправлення адміна
   (`EDIT_DIFF_FIELDS`, `fetchAdminEdits`, `adminEditsHtml`), "Мої години"
   (`renderMyHours` → `renderHoursScreen({viewer, subject, onBack})`,
   `loadMyHours`, `paidRepairHours`, `reportTotalHours`, `buildHoursWorkbook`,

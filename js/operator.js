@@ -1863,6 +1863,21 @@ async function renderOperatorForm(user, existingReport = null, draftOverride = n
         throw new Error('Обід і ремонт разом більші за час роботи на об\'єкті — перевір години.');
       }
 
+      // (з 2026-11-05) Мотогодини не можуть бути більші за час роботи у звіті
+      // (рівні — можна). До часу додається перебазування: якщо техніку
+      // переганяв сам, мотогодини йшли і в дорозі.
+      if (tracksMotoHours && !isNaN(startHoursVal) && !isNaN(endHoursVal)) {
+        const motoTotal = round2(endHoursVal - startHoursVal);
+        const allowed = round2(diffHours + travelHours);
+        if (motoTotal > allowed + 0.001) {
+          throw new Error(
+            `Мотогодин (${hoursUA(motoTotal)}) більше, ніж час роботи ${startTime}–${endTime} (${hoursUA(diffHours)} год)` +
+            (travelHours ? ` + перебазування (${hoursUA(travelHours)} год)` : '') +
+            '. Перевір мотогодини або час роботи.'
+          );
+        }
+      }
+
       const payload = {
         work_date: document.getElementById('work_date').value,
         operator_id: user.id,
@@ -2007,6 +2022,100 @@ async function findBlockingReport(operatorId, p, ownId) {
     Number(p.start_hours) < Number(r.end_hours) - HOURS_EPSILON &&
     Number(p.end_hours) > Number(r.start_hours) + HOURS_EPSILON;
   return rows.find(r => r.object_id === p.object_id) || rows.find(overlaps) || null;
+}
+
+// ---------- Перетин часу і мотогодин (з 2026-11-05) ----------
+// Одна людина не працює на двох машинах одночасно: час роботи звітів одного
+// оператора не перетинається (допуск на стику — TIME_JOIN_TOLERANCE_MIN).
+// Сума годин за день: понад DAY_WARN_HOURS — попередження, понад 24 — не можна.
+// Мотогодини однієї техніки не перетинаються між різними операторами
+// (крім "другого оператора" — у нього мотогодин немає).
+const TIME_JOIN_TOLERANCE_MIN = 10;
+const DAY_WARN_HOURS = 18;
+const DAY_MAX_HOURS = 24;
+
+function hoursUA(n) {
+  return String(round2(Number(n) || 0)).replace('.', ',');
+}
+
+function timeHM(t) {
+  return t ? String(t).slice(0, 5) : '';
+}
+
+// Інтервал роботи звіту в хвилинах від початку work_date; через північ — +24 год
+function reportTimeInterval(r) {
+  const st = timeHM(r.start_time), en = timeHM(r.end_time);
+  if (!/^\d\d:\d\d$/.test(st) || !/^\d\d:\d\d$/.test(en)) return null;
+  const toMin = t => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+  const day = Math.round(Date.parse(r.work_date + 'T00:00:00Z') / 86400000);
+  let s = toMin(st), e = toMin(en);
+  if (e < s) e += 1440;
+  return { s: day * 1440 + s, e: day * 1440 + e };
+}
+
+function shiftDate(iso, days) {
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// Мої подані звіти за день до, той самий і день після (через північ)
+async function fetchMyReportsAround(operatorId, workDate, ownId) {
+  let q = `operator_id=eq.${encodeURIComponent(operatorId)}` +
+    `&work_date=in.(${shiftDate(workDate, -1)},${workDate},${shiftDate(workDate, 1)})` +
+    `&status=neq.Чернетка&select=id,status,work_date,start_time,end_time,total_person_hours,commute_hours,travel_hours,transport_hours,repair_hours,equipment(name),objects(name,short_name)`;
+  if (ownId) q += `&id=neq.${encodeURIComponent(ownId)}`;
+  try {
+    return (await supaGet('daily_reports', q)) || [];
+  } catch (e) {
+    return []; // допоміжна перевірка — не блокує (у базі те саме правило)
+  }
+}
+
+// Перший звіт, з яким перетинається час роботи, або null
+function findTimeOverlap(rows, p) {
+  const a = reportTimeInterval(p);
+  if (!a) return null;
+  return rows.find(r => {
+    const b = reportTimeInterval(r);
+    return b && a.s < b.e - TIME_JOIN_TOLERANCE_MIN && a.e > b.s + TIME_JOIN_TOLERANCE_MIN;
+  }) || null;
+}
+
+function timeOverlapText(r, p) {
+  const where = r.objects?.short_name || r.objects?.name || '—';
+  return `Час роботи ${timeHM(p.start_time)}–${timeHM(p.end_time)} перетинається зі звітом ${r.id} ` +
+    `(${formatDateUA(r.work_date)}, ${timeHM(r.start_time)}–${timeHM(r.end_time)}, ${r.equipment?.name || '—'}, ${where}). ` +
+    'Одна людина не працює на двох машинах одночасно — вкажи час, коли ти працював саме на цій техніці.';
+}
+
+// Усього годин за день (усі мої подані звіти цієї дати + новий)
+function dayTotalHours(rows, p) {
+  return round2(rows.filter(r => r.work_date === p.work_date)
+    .reduce((sum, r) => sum + reportTotalHours(r), reportTotalHours(p)));
+}
+
+// Мотогодини цієї техніки вже вказав інший оператор (перетин), або null
+async function findOtherOperatorMotoOverlap(operatorId, p, ownId) {
+  if (p.start_hours === null || p.start_hours === undefined || p.end_hours === null || p.end_hours === undefined) return null;
+  let q = `equipment_id=eq.${encodeURIComponent(p.equipment_id)}` +
+    `&operator_id=neq.${encodeURIComponent(operatorId)}` +
+    `&status=neq.Чернетка&is_second_operator=is.false` +
+    `&start_hours=lt.${Number(p.end_hours) - HOURS_EPSILON}&end_hours=gt.${Number(p.start_hours) + HOURS_EPSILON}` +
+    `&select=id,work_date,start_hours,end_hours,users!daily_reports_operator_id_fkey(full_name)&order=id.asc&limit=1`;
+  if (ownId) q += `&id=neq.${encodeURIComponent(ownId)}`;
+  try {
+    const rows = (await supaGet('daily_reports', q)) || [];
+    return rows[0] || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function otherMotoText(r, p) {
+  return `Мотогодини ${p.start_hours} → ${p.end_hours} на цій техніці вже вказав ${r.users?.full_name || 'інший оператор'} ` +
+    `у звіті ${r.id} (${formatDateUA(r.work_date)}, ${r.start_hours} → ${r.end_hours}). Перевір мотогодини. ` +
+    'Якщо працювали разом на техніці «на двох операторів» — постав галочку «Я другий оператор».';
 }
 
 // Текст для оператора: чому не можна подати і що робити
@@ -2166,6 +2275,39 @@ function renderReportPreview(user, payload, isEdit, existingReport, equipmentNam
         if (openBtn) openBtn.addEventListener('click', () => openReportForFix(user, blocking.id, openBtn));
         confirmBtn.textContent = 'Підтвердити і відправити';
         editBtn.disabled = false;   // "Підтвердити" лишається вимкненою — подати дубль не можна
+        return;
+      }
+
+      // (з 2026-11-05) Перетин часу, сума за день, мотогодини інших операторів
+      const blockWith = (text) => {
+        errorBox.innerHTML = `<div>⛔ ${escHtml(text)}</div>`;
+        errorBox.classList.remove('hidden');
+        confirmBtn.textContent = 'Підтвердити і відправити';
+        editBtn.disabled = false;
+      };
+      const around = await fetchMyReportsAround(user.id, dbPayload.work_date, ownId);
+      const timeOverlap = findTimeOverlap(around, dbPayload);
+      if (timeOverlap) {
+        blockWith(timeOverlapText(timeOverlap, dbPayload));
+        return;
+      }
+      const dayTotal = dayTotalHours(around, dbPayload);
+      if (dayTotal > DAY_MAX_HOURS) {
+        blockWith(`За ${formatDateUA(dbPayload.work_date)} разом виходить ${hoursUA(dayTotal)} год — більше ніж ${DAY_MAX_HOURS}. Перевір години в цьому та інших звітах за цей день.`);
+        return;
+      }
+      if (dayTotal > DAY_WARN_HOURS && !confirm(
+        `За ${formatDateUA(dbPayload.work_date)} разом виходить ${hoursUA(dayTotal)} год (робота, дорога, перебазування, перевезення).\n\n` +
+        'Все правильно? Натисни «OK», щоб відправити, або «Скасувати», щоб перевірити.'
+      )) {
+        confirmBtn.disabled = false;
+        editBtn.disabled = false;
+        confirmBtn.textContent = 'Підтвердити і відправити';
+        return;
+      }
+      const otherMoto = await findOtherOperatorMotoOverlap(user.id, dbPayload, ownId);
+      if (otherMoto) {
+        blockWith(otherMotoText(otherMoto, dbPayload));
         return;
       }
 
