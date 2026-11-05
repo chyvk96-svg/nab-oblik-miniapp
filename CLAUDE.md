@@ -228,7 +228,8 @@ supabase/functions/export-1c/ — Edge Function для 1С (з 20.10): лише 
   перебазування зі списку об'єктів (з 22.10: `travelPoints`, `travelResult`,
   `travelRouteText`, `TRAVEL_MAX_POINTS = 4`), захист від
   дублів (`findMatchingDraftId`, `deleteLeftoverDrafts`,
-  `findSimilarSubmittedReports`, `sameReportFilter`), виправлення адміна
+  `findBlockingReport` + `blockingReportText` — з 05.11 дубль НЕ подається,
+  `sameReportFilter`; банер повернених `loadReturnedBanner` / `openReportForFix`), виправлення адміна
   (`EDIT_DIFF_FIELDS`, `fetchAdminEdits`, `adminEditsHtml`), "Мої години"
   (`renderMyHours` → `renderHoursScreen({viewer, subject, onBack})`,
   `loadMyHours`, `paidRepairHours`, `reportTotalHours`, `buildHoursWorkbook`,
@@ -557,7 +558,7 @@ Make (MCP) — давай користувачу покрокові інстру
 | "Не вдалося увійти" / "Сесія завершилась" | Дивись `errors` з `action_id = 'TG_AUTH'` (пише `tg-auth`): `403 not_found` — немає в `users` / неправильний `telegram_id`; `inactive`; `401 expired` — старий initData (закрити й відкрити Mini App); таймаут — слабкий інтернет |
 | `invalid input syntax for type time` | У поле часу пішло "—" або неповний час; лише `ГГ:ХВ` або NULL |
 | Excel "відновлення книги" | Апостроф `'` у назві аркуша → `xlNewSheet` замінює на `’` |
-| Дублі звітів | Захист з 25.09 (черга чернеток + пошук дублів); старі дублі адмін видаляє ("⚠ СХОЖЕ НА ДУБЛЬ") |
+| Дублі звітів | Захист з 25.09 (черга чернеток + пошук дублів); з 05.11 дубль (той самий оператор+дата+техніка і той самий об'єкт або м/г перекриваються) не подається, банер повернених звітів; старі дублі адмін видаляє ("⚠ СХОЖЕ НА ДУБЛЬ") — краще непідтверджений, мотогодини техніки при видаленні не змінюються |
 
 ---
 

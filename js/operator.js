@@ -9,7 +9,10 @@ const HOURS_EPSILON = 0.05; // допустима похибка при порі
 function renderOperatorHome(user) {
   app.innerHTML = `
     ${topbarHtml('Головне меню', roleSubtitle(user))}
-    <div class="wrap" style="padding-top:14px" id="drafts-banner-wrap"></div>
+    <div class="wrap" style="padding-top:14px">
+      <div id="returned-banner-wrap"></div>
+      <div id="drafts-banner-wrap"></div>
+    </div>
     <div class="menu-list">
       <button class="menu-btn" id="btn-new-report">
         <span class="emoji">🚜</span>
@@ -38,7 +41,67 @@ function renderOperatorHome(user) {
   document.getElementById('btn-my-reports').addEventListener('click', () => renderMyReports(user));
   document.getElementById('btn-my-hours').addEventListener('click', () => renderMyHours(user));
 
+  loadReturnedBanner(user);
   loadDraftsBanner(user);
+}
+
+// ---------- Банер звітів, повернених на коригування (з 2026-11-05) ----------
+// Щоб оператор виправляв повернений звіт, а не подавав новий (так з'являлись
+// дублі: REP-328 повернено → подано REP-334 з тими самими даними).
+async function loadReturnedBanner(user) {
+  const wrap = document.getElementById('returned-banner-wrap');
+  if (!wrap) return;
+
+  let rows;
+  try {
+    rows = await supaGet(
+      'daily_reports',
+      `operator_id=eq.${user.id}&status=eq.Повернено на коригування&select=id,work_date,equipment(name),objects(name,short_name)&order=work_date.asc`
+    );
+  } catch (e) {
+    wrap.innerHTML = '';   // індикатор не критичний
+    return;
+  }
+  if (!rows || rows.length === 0) {
+    wrap.innerHTML = '';
+    return;
+  }
+
+  wrap.innerHTML = `
+    <div class="discrepancy-box" style="margin:0 0 14px">
+      <div class="flag">🔧 ПОВЕРНЕНО НА КОРИГУВАННЯ (${rows.length})</div>
+      ${rows.map(r => `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px">
+          <span>${formatDateUA(r.work_date)} · ${escHtml(r.equipment?.name || '—')} · ${escHtml(r.objects?.short_name || r.objects?.name || '—')}</span>
+          <button class="btn-confirm" style="padding:6px 10px;flex:0 0 auto" data-fix-id="${r.id}">Виправити</button>
+        </div>
+      `).join('')}
+      <div class="hint-inline" style="margin-top:8px">Виправ цей звіт і надішли повторно — новий звіт за цей день не подавай.</div>
+    </div>
+  `;
+
+  wrap.querySelectorAll('[data-fix-id]').forEach(btn => {
+    btn.addEventListener('click', () => openReportForFix(user, btn.dataset.fixId, btn));
+  });
+}
+
+// Відкрити свій повернений звіт у формі для виправлення
+async function openReportForFix(user, reportId, btn) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Завантаження...';
+  try {
+    const rows = await supaGet('daily_reports', `id=eq.${reportId}&select=*`);
+    if (rows && rows.length > 0) {
+      renderOperatorForm(user, rows[0]);
+      return;
+    }
+    alert('Звіт не знайдено.');
+  } catch (e) {
+    alert('Помилка завантаження: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = label;
 }
 
 // ---------- Банер незавершених чернеток на головному екрані оператора ----------
@@ -1919,15 +1982,44 @@ function sameReportFilter(operatorId, p) {
     `&object_id=eq.${encodeURIComponent(p.object_id)}`;
 }
 
-// Уже подані (не чернетки) звіти з тим самим ключем, крім ownId.
-async function findSimilarSubmittedReports(operatorId, p, ownId) {
+// (з 2026-11-05) Дубль, який НЕ можна подати (раніше було лише питання "Все
+// одно відправити?"). Уже поданий звіт (не чернетка) цього оператора за ту
+// саму дату на тій самій техніці, крім ownId, і:
+//   а) той самий об'єкт, або
+//   б) мотогодини перекриваються (5296→5300 і ще раз 5296→5300).
+// Два звіти за день на різних об'єктах із послідовними мотогодинами
+// (5296→5300, потім 5300→5304) — дозволені. Повертає звіт-перешкоду або null;
+// помилка мережі → null (як і інші допоміжні перевірки, не блокує подачу).
+async function findBlockingReport(operatorId, p, ownId) {
+  let rows;
   try {
-    let q = `${sameReportFilter(operatorId, p)}&status=neq.Чернетка&select=id,status&order=id.asc`;
+    let q = `operator_id=eq.${encodeURIComponent(operatorId)}` +
+      `&work_date=eq.${encodeURIComponent(p.work_date)}` +
+      `&equipment_id=eq.${encodeURIComponent(p.equipment_id)}` +
+      `&status=neq.Чернетка&select=id,status,object_id,start_hours,end_hours,objects(name,short_name)&order=id.asc`;
     if (ownId) q += `&id=neq.${encodeURIComponent(ownId)}`;
-    return (await supaGet('daily_reports', q)) || [];
+    rows = (await supaGet('daily_reports', q)) || [];
   } catch (e) {
-    return []; // перевірка допоміжна — не блокує подачу
+    return null;
   }
+  const hasHours = r => r.start_hours !== null && r.start_hours !== undefined && r.end_hours !== null && r.end_hours !== undefined;
+  const overlaps = r => hasHours(r) && hasHours(p) &&
+    Number(p.start_hours) < Number(r.end_hours) - HOURS_EPSILON &&
+    Number(p.end_hours) > Number(r.start_hours) + HOURS_EPSILON;
+  return rows.find(r => r.object_id === p.object_id) || rows.find(overlaps) || null;
+}
+
+// Текст для оператора: чому не можна подати і що робити
+function blockingReportText(r, p) {
+  const where = r.objects?.short_name || r.objects?.name || '—';
+  const hours = (r.start_hours !== null && r.end_hours !== null) ? `, ${r.start_hours} → ${r.end_hours} м/г` : '';
+  const head = r.object_id === p.object_id
+    ? `За ${formatDateUA(p.work_date)} на цю техніку й цей об'єкт уже є звіт ${r.id} (${r.status}${hours}).`
+    : `Мотогодини ${p.start_hours} → ${p.end_hours} перекриваються зі звітом ${r.id} (${where}${hours}, ${r.status}).`;
+  if (r.status === 'Повернено на коригування') {
+    return head + ' Не подавай новий — відкрий цей звіт і виправ його.';
+  }
+  return head + ' Повторно подавати не треба. Якщо в ньому помилка — попроси відповідального повернути його на коригування.';
 }
 
 // (з 2026-10-14) Подані (не чернетки) звіти ІНШИХ операторів за ту саму дату
@@ -2056,22 +2148,25 @@ function renderReportPreview(user, payload, isEdit, existingReport, equipmentNam
         return;
       }
 
-      // Попередження про можливий дубль: уже поданий звіт цього оператора
-      // за ту саму дату на тій самій техніці й об'єкті (чернетки не рахуються).
+      // (з 2026-11-05) Дубль не подається: уже є звіт цього оператора за ту
+      // саму дату на тій самій техніці — на тому самому об'єкті або з
+      // мотогодинами, що перекриваються (див. findBlockingReport).
       const ownId = isEdit ? existingReport.id : draftId;
-      const similar = await findSimilarSubmittedReports(user.id, dbPayload, ownId);
-      if (similar.length) {
-        const list = similar.map(r => `${r.id} (${r.status})`).join(', ');
-        const goOn = confirm(
-          `Увага: за ${formatDateUA(dbPayload.work_date)} на цій техніці й об'єкті вже є звіт: ${list}.\n\n` +
-          `Це може бути дубль. Все одно відправити?`
-        );
-        if (!goOn) {
-          confirmBtn.disabled = false;
-          editBtn.disabled = false;
-          confirmBtn.textContent = 'Підтвердити і відправити';
-          return;
-        }
+      const blocking = await findBlockingReport(user.id, dbPayload, ownId);
+      if (blocking) {
+        errorBox.innerHTML = `
+          <div>⛔ ${escHtml(blockingReportText(blocking, dbPayload))}</div>
+          ${blocking.status === 'Повернено на коригування'
+            ? `<button type="button" class="btn-confirm" id="open-blocking-btn" style="margin-top:10px;width:100%">Відкрити ${escHtml(blocking.id)} і виправити</button>`
+            : ''}
+          ${hasDraftRow ? '<div style="margin-top:8px">Цю чернетку можна видалити на головному екрані.</div>' : ''}
+        `;
+        errorBox.classList.remove('hidden');
+        const openBtn = document.getElementById('open-blocking-btn');
+        if (openBtn) openBtn.addEventListener('click', () => openReportForFix(user, blocking.id, openBtn));
+        confirmBtn.textContent = 'Підтвердити і відправити';
+        editBtn.disabled = false;   // "Підтвердити" лишається вимкненою — подати дубль не можна
+        return;
       }
 
       // Новий звіт без відомої чернетки: якщо в базі вже є чернетка з тими
